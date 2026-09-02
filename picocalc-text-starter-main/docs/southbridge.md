@@ -1,0 +1,92 @@
+# Southbridge
+
+The southbridge is the MPU (STM32F103R8T6) on the mainboard of the PicoCalc. This MPU interfaces the low-speed devices to the Pico.
+
+
+## sb_init
+
+`void sb_init(void)`
+
+Initializes the southbridge interface.
+
+## sb_available
+
+`bool sb_available(void)`
+
+Returns true if the southbridge is available, false otherwise.
+
+
+## sb_read_keyboard
+
+`uint16_t sb_read_keyboard(void)`
+
+Read a key status and code from the keyboard as a 16-bit half-word. The upper byte is the key status, the lower byte is the key code. 
+
+## sb_read_keyboard_state
+
+`uint16_t sb_read_keyboard_state(void)`
+
+Read the current state of the keyboard. The value is the number of characters waiting in the FIFO. If bit 5 is set, it indicates that the CapsLK is set.
+
+## sb_read_battery
+
+`uint8_t sb_read_battery(void)`
+
+Read the battery status. The MSB of the returned valus is set if the battery is charging.
+
+## sb_read_lcd_backlight
+
+`uint8_t sb_read_lcd_backlight(void)`
+
+Read the current LCD Display backlight brightness, 0 (dark) to 255 (bright).
+
+
+## sb_write_lcd_backlight
+
+`uint8_t sb_write_lcd_backlight(uint8_t brightness)`
+
+Sets the LCD Display backlight brightness and returns the value that the southbridge reports.
+
+### Parameters
+
+- brightness – a value between 0 (dark) and 255 (bright)
+
+
+## sb_read_keyboard_backlight
+
+`uint8_t sb_read_keyboard_backlight(void)`
+
+Reads the current keyboard backlight brightness, 0 (dark) to 255 (bright).
+
+
+## sb_write_keyboard_backlight
+
+`uint8_t sb_write_keyboard_backlight(uint8_t brightness)`
+
+Sets the keyboard backlight brightness and returns the value that the southbridge reports.
+
+### Parameters
+
+- brightness – a value between 0 (dark) and 255 (bright)
+
+
+## sb_is_power_off_supported
+
+`bool sb_is_power_off_supported(void)`
+
+Returns true if power off is supported, false otherwise. This function will return true if BIOS 1.4 is present.
+
+
+
+## sb_write_power_off_delay
+
+`bool sb_write_power_off_delay(uint8_t delay_seconds)`
+
+Powers off the PicoCalc after the specified delay. Requires BIOS 1.4.
+
+
+## sb_reset
+
+`bool sb_reset(uint8_t delay_seconds)`
+
+Reset the PicoCalc after a delay. Requires BIOS 1.4.

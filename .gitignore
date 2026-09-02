@@ -1,0 +1,15 @@
+# Build output
+/build/
+*.uf2
+*.elf
+*.bin
+*.hex
+*.map
+*.dis
+
+# Bundled source archives (fetch the Pico SDK / starter separately)
+*.zip
+
+# Editor / OS cruft
+.DS_Store
+Thumbs.db
