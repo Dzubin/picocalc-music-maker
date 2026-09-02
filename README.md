@@ -15,7 +15,6 @@ CMakeLists.txt              builds it, reusing picocalc-text-starter-main/driver
 pico_sdk_import.cmake        standard Pico SDK locator (copied from the starter)
 picocalc-text-starter-main/  vendored driver layer + songs.c (see License; do not edit)
 LICENSE, CHANGELOG.md        MIT licence; version history
-CLAUDE.md                    notes for AI coding assistants
 ```
 
 ## What it does

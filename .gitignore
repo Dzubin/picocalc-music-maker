@@ -13,3 +13,6 @@
 # Editor / OS cruft
 .DS_Store
 Thumbs.db
+
+# Local AI-assistant notes, not for the public repo
+CLAUDE.md
