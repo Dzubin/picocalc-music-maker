@@ -10,7 +10,9 @@ _Nothing yet._
 
 ## [0.01A] - 2026-09-02
 
-Baseline. Everything below is the starting point for future entries.
+First tagged release —
+<https://github.com/Dzubin/picocalc-music-maker/releases/tag/v0.01A>.
+Everything below is the baseline for future entries.
 
 ### Splash screen
 - Double-size title, `VERSION` line, "BY THOMAS DZUBIN" and the
@@ -69,3 +71,13 @@ Baseline. Everything below is the starting point for future entries.
   live note-key layout.
 - Built on the Raspberry Pi Pico SDK and the vendored `picocalc-text-starter`
   drivers by Blair Leduc.
+
+### Project / packaging
+- Published to GitHub (`Dzubin/picocalc-music-maker`) under the MIT License;
+  the vendored `picocalc-text-starter-main/` keeps its own MIT license.
+- Added `LICENSE`, `CHANGELOG.md`, `CLAUDE.md`, `.gitignore` (excludes
+  `build/`, `*.uf2`, `*.zip`) and `.gitattributes` (`eol=lf`).
+- README gained **License** and **Known limitations** sections and a pointer
+  to the Releases page.
+- Release assets: prebuilt `picocalc-music-maker_V001A_RP2040.uf2` (Pico /
+  Pico W) and `..._RP2350.uf2` (Pico 2).
