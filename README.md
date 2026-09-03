@@ -232,10 +232,11 @@ halves, same as live). The octave‑up keys (`K` `L` `ENTER`, `I` `O` `P`, `,`
 
 ## Building
 
-> **Just want to run it?** Grab a prebuilt `.uf2` from the
-> [Releases](https://github.com/Dzubin/picocalc-music-maker/releases) page —
-> `..._RP2040.uf2` for a PicoCalc with a Pico / Pico W, `..._RP2350.uf2` for a
-> Pico 2 — and skip to [Flashing](#flashing).
+> **Just want to run it?** Grab the prebuilt `..._RP2040.uf2` from the
+> [Releases](https://github.com/Dzubin/picocalc-music-maker/releases) page (for
+> a PicoCalc with a **Pico / Pico W**) and skip to [Flashing](#flashing). There
+> is no prebuilt **Pico 2 / RP2350** binary yet — build that one yourself with
+> `-DPICO_BOARD=pico2` (see below).
 
 You need the Raspberry Pi Pico SDK toolchain (arm‑none‑eabi‑gcc, CMake, Ninja) –
 exactly what `picocalc-text-starter` already builds with.
@@ -270,7 +271,7 @@ The result is **`build/picocalc-music-maker.uf2`**.
    already running, press **`~`** / SHIFT + backtick – it reboots straight
    into BOOTSEL).
 2. Copy the `.uf2` onto the `RPI-RP2` / `RP2350` drive — your own
-   `build/picocalc-music-maker.uf2`, or the matching board file from a
+   `build/picocalc-music-maker.uf2`, or the RP2040 build from a
    [release](https://github.com/Dzubin/picocalc-music-maker/releases).
 3. The PicoCalc restarts into the program.
 
