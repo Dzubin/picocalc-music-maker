@@ -79,5 +79,5 @@ Everything below is the baseline for future entries.
   `build/`, `*.uf2`, `*.zip`) and `.gitattributes` (`eol=lf`).
 - README gained **License** and **Known limitations** sections and a pointer
   to the Releases page.
-- Release asset: prebuilt `picocalc-music-maker_V001A_RP2040.uf2` (Pico /
-  Pico W). No Pico 2 / RP2350 binary yet — build it with `-DPICO_BOARD=pico2`.
+- Release assets: prebuilt `picocalc-music-maker_V001A_RP2040.uf2` (Pico /
+  Pico W) and `picocalc-music-maker_V001A_RP2350.uf2` (Pico 2).
