@@ -142,7 +142,7 @@ volatile bool user_interrupt = false;
 /* ===================================================================== */
 
 /* shown on the splash screen */
-#define VERSION "V0.01A"
+#define VERSION "V0.01B"
 
 /* audio.pio only produces a tone for 100..2115 Hz (its upper bound was
  * raised from 2000 so the top C, C7 ~2093 Hz, can sound); outside that

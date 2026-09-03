@@ -4,7 +4,10 @@ All notable changes to PicoCalc Music Maker.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 the version here matches the `VERSION` define in `music_maker.c`.
 
-## [Unreleased]
+## [0.01B] - Unreleased
+
+`VERSION` in `music_maker.c` is now `V0.01B`; changes for this round go here
+and the heading gets a date when it's tagged.
 
 _Nothing yet._
 
