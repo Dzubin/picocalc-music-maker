@@ -8,7 +8,7 @@ the version here matches the `VERSION` define in `music_maker.c`.
 
 _Nothing yet._
 
-## [0.01A] - 2026-09-02
+## [0.01A] - 2026-09-03
 
 First tagged release —
 <https://github.com/Dzubin/picocalc-music-maker/releases/tag/v0.01A>.
