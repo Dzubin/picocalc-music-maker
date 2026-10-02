@@ -1,6 +1,6 @@
 /*
  * platform_desktop.c - platform.h for the Windows / Linux (SDL2) build. The
- * clock and sleep come from the shim's core; there is no BOOTSEL or reboot
+ * clock and sleep come from the shim's core; there is no BOOTSEL or UF2 Loader
  * on a PC, so both just close the program.
  *
  * Author: Thomas Dzubin
@@ -31,7 +31,7 @@ _Noreturn void plat_bootsel(void)
     exit(0);
 }
 
-_Noreturn void plat_reboot(void)
+_Noreturn void plat_exit_to_loader(void)
 {
     exit(0);
 }

@@ -85,9 +85,9 @@
 #define SPLASH_ROW_VERSION     7
 #define SPLASH_ROW_CREDIT_1   14
 #define SPLASH_ROW_CREDIT_2   15
-#define SPLASH_ROW_PROMPT     20    /* the reboot confirmation reuses these  */
-#define SPLASH_ROW_REBOOT     21    /* two rows                              */
-#define ROW_REBOOTING         15    /* "REBOOTING..." over the credits       */
+#define SPLASH_ROW_PROMPT     20    /* the exit confirmation reuses these    */
+#define SPLASH_ROW_EXIT       21    /* two rows                              */
+#define ROW_REBOOTING         15    /* BOOTSEL / loader notice over credits  */
 
 /* music screen: tips, status lines and the note band */
 #define ROW_TITLE              2

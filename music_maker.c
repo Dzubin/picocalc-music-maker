@@ -21,14 +21,16 @@
  *
  *  Two headers keep this file to code only: music_maker_const.h holds every
  *  constant (limits, colours, screen positions, help text, data tables) and
- *  platform.h is the whole interface to the machine (clock, sleep, reboot),
- *  implemented per platform in platform_pico.c and desktop/platform_desktop.c.
+ *  platform.h is the whole interface to the machine (clock, sleep, BOOTSEL,
+ *  exit to the UF2 Loader), implemented per platform in platform_pico.c and
+ *  desktop/platform_desktop.c.
  *
  *  ------------------------------------------------------------------------
  *  Controls
  *  ------------------------------------------------------------------------
- *    Splash screen ...... any key begins.  ESC asks "erase all recordings?"
- *                         and, on Y, reboots (recordings are RAM-only).  '~'
+ *    Splash screen ...... any key begins.  ESC or Q asks "erase all
+ *                         recordings?" and, on Y, exits to the PicoCalc UF2
+ *                         Loader menu (recordings are RAM-only).  '~'
  *                         (SHIFT + backtick) reboots into BOOTSEL mode.
  *
  *    Then, a note sounds for as long as its key is held.  The centre of the
@@ -136,8 +138,41 @@
 #include "keyboard.h"     /* KEY_* codes, KEY_STATE_* values                 */
 #include "songs.h"        /* Blair Leduc's songs[] library (not modified)    */
 
-#include "platform.h"     /* clock, sleep, BOOTSEL / reboot (per platform)   */
+#include "platform.h"     /* clock, sleep, BOOTSEL, loader exit              */
 #include "music_maker_const.h"  /* every constant, screen position, table   */
+
+/* ===================================================================== */
+/*  Forward declarations for what main() calls, so main() can sit here    */
+/* ===================================================================== */
+static void splash_screen(void);
+static void wait_any_key(void);
+static void load_builtin_songs(void);
+static void music_screen(void);
+
+/* ===================================================================== */
+/*  main                                                                  */
+/*                                                                        */
+/*  Sets up the hardware once, then loops forever: draw the splash, wait  */
+/*  for a key, then run the Music Maker screen.  ESC on that screen       */
+/*  returns here and the splash is redrawn.                               */
+/* ===================================================================== */
+int main(void)
+{
+    plat_init();
+
+    sb_init();               /* keyboard / south-bridge I2C (no bg poll) */
+    lcd_init();               /* ST7365P LCD */
+    lcd_enable_cursor(false); /* we don't want the blinking text cursor */
+    audio_init();             /* PIO PWM audio on GP26 / GP27 */
+
+    load_builtin_songs();     /* fill recorder rows 2..11 from songs.c */
+
+    for (;;) {
+        splash_screen();
+        wait_any_key();
+        music_screen();       /* returns when ESC is pressed */
+    }
+}
 
 /* ===================================================================== */
 /*  Shared types                                                          */
@@ -211,10 +246,9 @@ static inline uint16_t key_event(void);
 static inline uint8_t  ev_state(uint16_t e);
 static inline uint8_t  ev_code(uint16_t e);
 static void go_bootsel(void);
-static void go_reboot(void);
+static void go_loader(void);
 static void drain_keys(void);
-static bool confirm_reboot(void);
-static void wait_any_key(void);
+static bool confirm_exit(void);
 static uint8_t wait_key(void);
 
 /* key -> note mapping */
@@ -240,10 +274,8 @@ static void play_recording(void);
 
 /* built-in songs (from Blair Leduc's songs.c) */
 static const char *freq_to_spn(uint16_t hz);
-static void load_builtin_songs(void);
 
 /* music maker screen */
-static void splash_screen(void);
 static void draw_static_text(void);
 static void show_notemap(void);
 static void draw_screen(int oct, bool recording);
@@ -266,202 +298,184 @@ static void splash_screen(void)
             COL_GREY);
     put_row(SPLASH_ROW_CREDIT_2, "(picocalc-text-starter)", COL_GREY);
     put_row(SPLASH_ROW_PROMPT, "PRESS ANY KEY TO START", COL_WHITE);
-    put_row(SPLASH_ROW_REBOOT, "or ESC to reboot (erases recordings)",
+    put_row(SPLASH_ROW_EXIT, "or ESC / Q to exit (erases recordings)",
             COL_GREY);
 }
 
 /* ===================================================================== */
-/*  main                                                                  */
+/*  Music Maker screen                                                    */
 /*                                                                        */
-/*  Sets up the hardware once, then loops forever: draw the splash, wait  */
-/*  for a key, then run the Music Maker main loop screen inline.  ESC in  */
-/*  that inner loop breaks back out here and the splash is redrawn.       */
+/*  The main key loop: notes, octave shift, recorder, help.  ESC returns  */
+/*  to main(), which shows the splash screen again.                       */
 /* ===================================================================== */
-int main(void)
+static void music_screen(void)
 {
-    plat_init();
+    int      oct       = 0;   /* net UP presses: + multiplies, - divides */
+    uint8_t  sounding   = 0;  /* key code of the note or rest held, 0=none */
+    uint32_t press_ms   = 0;  /* when the in-progress key went down */
+    uint16_t press_lo   = 0;  /* left  freq to record for it (0 for a rest) */
+    uint16_t press_hi   = 0;  /* right freq to record for it (0 for a rest) */
+    char     press_spn[4] = "";  /* SPN to record for it */
+    bool     recording  = false;
+    uint8_t  mods       = 0;  /* SHIFT / CTRL held, for the note layer */
 
-    sb_init();               /* keyboard / south-bridge I2C (no bg poll) */
-    lcd_init();               /* ST7365P LCD */
-    lcd_enable_cursor(false); /* we don't want the blinking text cursor */
-    audio_init();             /* PIO PWM audio on GP26 / GP27 */
-
-    load_builtin_songs();     /* fill recorder rows 2..11 from songs.c */
+    draw_screen(oct, recording);
 
     for (;;) {
-        splash_screen();
-        wait_any_key();
+        uint16_t e = key_event();
+        if (!e) {
+            plat_sleep_ms(2);
+            continue;
+        }
 
-        /* ------------------------------------------------------------- */
-        /*  Music Maker main loop screen                                 */
-        /* ------------------------------------------------------------- */
-        int      oct       = 0;   /* net UP presses: + multiplies, - divides */
-        uint8_t  sounding   = 0;  /* key code of the note or rest held, 0=none */
-        uint32_t press_ms   = 0;  /* when the in-progress key went down */
-        uint16_t press_lo   = 0;  /* left  freq to record for it (0 for a rest) */
-        uint16_t press_hi   = 0;  /* right freq to record for it (0 for a rest) */
-        char     press_spn[4] = "";  /* SPN to record for it */
-        bool     recording  = false;
-        uint8_t  mods       = 0;  /* SHIFT / CTRL held, for the note layer */
+        uint8_t code = ev_code(e);
+        uint8_t st   = ev_state(e);
 
-        draw_screen(oct, recording);
+        /* '~' (ASCII 126 = SHIFT + backtick) reboots to BOOTSEL.  This is
+         * intentionally not shown anywhere on screen; the two-key combo
+         * keeps it from being pressed by accident.                       */
+        if (code == '~' && st == KEY_STATE_PRESSED)
+            go_bootsel();
 
-        for (;;) {
-            uint16_t e = key_event();
-            if (!e) {
-                plat_sleep_ms(2);
+        /* ESC leaves this screen; the outer loop then shows the splash */
+        if (code == KEY_ESC && st == KEY_STATE_PRESSED) {
+            audio_stop();
+            return;
+        }
+
+        /* ---- track SHIFT / CTRL for the note layer (see map_key) ---- */
+        if (code == KEY_MOD_SHL || code == KEY_MOD_SHR) {
+            if (st == KEY_STATE_PRESSED)  mods |=  MOD_SHIFT;
+            if (st == KEY_STATE_RELEASED) mods &= ~MOD_SHIFT;
+            continue;
+        }
+        if (code == KEY_MOD_CTRL) {
+            if (st == KEY_STATE_PRESSED)  mods |=  MOD_CTRL;
+            if (st == KEY_STATE_RELEASED) mods &= ~MOD_CTRL;
+            continue;
+        }
+
+        /* ---- transport / control keys (act on press) ---- */
+        if (st == KEY_STATE_PRESSED) {
+            if (code == KEY_F1) {                    /* toggle RECORD */
+                recording = !recording;
+                show_recstat(recording);
+                show_reckeys(recording);   /* light up / dim the edit keys */
                 continue;
             }
+            if (code == KEY_F2) {                    /* PLAY back */
+                recording = false;
+                play_recording();
+                mods = 0;               /* playback ate any mod-release event */
+                show_recstat(recording);
+                show_reckeys(recording);
+                continue;
+            }
+            if (code == KEY_F3) {                    /* EDIT - not done yet */
+                not_implemented("EDIT");
+                mods = 0;               /* the drain ate mod releases */
+                continue;
+            }
+            if (code == KEY_F4) {                    /* SAVE - not done yet */
+                not_implemented("SAVE");
+                mods = 0;
+                continue;
+            }
+            if (code == KEY_F5) {                    /* LOAD - not done yet */
+                not_implemented("LOAD");
+                mods = 0;
+                continue;
+            }
+            if (code == KEY_DEL) {                   /* CLEAR (asks Y/N) */
+                confirm_and_clear(&recording);
+                mods = 0;
+                continue;
+            }
+            if (code == '?') {                       /* help (SHIFT + /) */
+                show_help();
+                draw_screen(oct, recording);
+                mods = 0;               /* help's key-wait ate mod releases */
+                continue;
+            }
+            if (code == '=') {                       /* next song 0..11 */
+                cur_song = (cur_song + 1) % REC_SONGS;
+                show_song();
+                show_recstat(recording);   /* note count is per-song now */
+                continue;
+            }
+            if (code == '\\') {                      /* switch key layout */
+                note_map = (note_map == MAP_FULL) ? MAP_LETTERS : MAP_FULL;
+                show_notemap();
+                continue;
+            }
+            if (code == KEY_BACKSPACE) {             /* undo last entry */
+                if (recording) {
+                    rec_pop();
+                    show_recstat(recording);
+                }
+                continue;
+            }
+            if (code == KEY_UP || code == KEY_DOWN) {/* octave shift */
+                if (code == KEY_UP   && oct < OCT_MAX) oct++;
+                if (code == KEY_DOWN && oct > OCT_MIN) oct--;
+                show_octave(oct);
+                continue;
+            }
+        }
 
-            uint8_t code = ev_code(e);
-            uint8_t st   = ev_state(e);
+        /* ---- SPACE = rest, only while recording ---- */
+        if (code == KEY_SPACE) {
+            if (st == KEY_STATE_PRESSED && sounding == 0 && recording) {
+                sounding   = KEY_SPACE;
+                press_ms   = plat_now_ms();
+                press_lo   = 0;
+                press_hi   = 0;
+                press_spn[0] = '\0';
+                show_note("-", 0, 0);
+            } else if (st == KEY_STATE_RELEASED && sounding == KEY_SPACE) {
+                if (recording) {               /* skip if REC went off */
+                    rec_push(0, 0, clamp_ms(plat_now_ms() - press_ms), "");
+                    show_recstat(recording);
+                }
+                clear_band();
+                sounding = 0;
+            }
+            continue;
+        }
 
-            /* '~' (ASCII 126 = SHIFT + backtick) reboots to BOOTSEL.  This is
-             * intentionally not shown anywhere on screen; the two-key combo
-             * keeps it from being pressed by accident.                       */
-            if (code == '~' && st == KEY_STATE_PRESSED)
-                go_bootsel();
+        /* ---- notes ---- */
+        if (st == KEY_STATE_PRESSED) {
+            if (sounding != 0)                       /* one key at a time */
+                continue;
 
-            /* ESC leaves this screen; the outer loop then shows the splash */
-            if (code == KEY_ESC && st == KEY_STATE_PRESSED) {
+            keymap_t m;
+            if (!map_key(code, mods, &m) || m.act != A_NOTE)
+                continue;
+
+            uint32_t lo = m.left, hi = m.right;
+            if (!is_dtmf(&m)) {                      /* DTMF ignores arrows */
+                lo = shift_octave(lo, oct);
+                hi = shift_octave(hi, oct);
+            }
+
+            audio_play_sound(lo, hi);
+            show_note(m.label, lo, hi);
+            sounding = code;
+            press_ms = plat_now_ms();
+            /* lo == hi for a plain note; a DTMF key keeps its two tones */
+            press_lo = (uint16_t)lo;
+            press_hi = (uint16_t)hi;
+            make_spn(m.label, m.up8va, press_spn);
+        } else if (st == KEY_STATE_RELEASED) {
+            if (code == sounding) {
                 audio_stop();
-                break;
-            }
-
-            /* ---- track SHIFT / CTRL for the note layer (see map_key) ---- */
-            if (code == KEY_MOD_SHL || code == KEY_MOD_SHR) {
-                if (st == KEY_STATE_PRESSED)  mods |=  MOD_SHIFT;
-                if (st == KEY_STATE_RELEASED) mods &= ~MOD_SHIFT;
-                continue;
-            }
-            if (code == KEY_MOD_CTRL) {
-                if (st == KEY_STATE_PRESSED)  mods |=  MOD_CTRL;
-                if (st == KEY_STATE_RELEASED) mods &= ~MOD_CTRL;
-                continue;
-            }
-
-            /* ---- transport / control keys (act on press) ---- */
-            if (st == KEY_STATE_PRESSED) {
-                if (code == KEY_F1) {                    /* toggle RECORD */
-                    recording = !recording;
+                if (recording) {
+                    rec_push(press_lo, press_hi,
+                             clamp_ms(plat_now_ms() - press_ms), press_spn);
                     show_recstat(recording);
-                    show_reckeys(recording);   /* light up / dim the edit keys */
-                    continue;
                 }
-                if (code == KEY_F2) {                    /* PLAY back */
-                    recording = false;
-                    play_recording();
-                    mods = 0;               /* playback ate any mod-release event */
-                    show_recstat(recording);
-                    show_reckeys(recording);
-                    continue;
-                }
-                if (code == KEY_F3) {                    /* EDIT - not done yet */
-                    not_implemented("EDIT");
-                    mods = 0;               /* the drain ate mod releases */
-                    continue;
-                }
-                if (code == KEY_F4) {                    /* SAVE - not done yet */
-                    not_implemented("SAVE");
-                    mods = 0;
-                    continue;
-                }
-                if (code == KEY_F5) {                    /* LOAD - not done yet */
-                    not_implemented("LOAD");
-                    mods = 0;
-                    continue;
-                }
-                if (code == KEY_DEL) {                   /* CLEAR (asks Y/N) */
-                    confirm_and_clear(&recording);
-                    mods = 0;
-                    continue;
-                }
-                if (code == '?') {                       /* help (SHIFT + /) */
-                    show_help();
-                    draw_screen(oct, recording);
-                    mods = 0;               /* help's key-wait ate mod releases */
-                    continue;
-                }
-                if (code == '=') {                       /* next song 0..11 */
-                    cur_song = (cur_song + 1) % REC_SONGS;
-                    show_song();
-                    show_recstat(recording);   /* note count is per-song now */
-                    continue;
-                }
-                if (code == '\\') {                      /* switch key layout */
-                    note_map = (note_map == MAP_FULL) ? MAP_LETTERS : MAP_FULL;
-                    show_notemap();
-                    continue;
-                }
-                if (code == KEY_BACKSPACE) {             /* undo last entry */
-                    if (recording) {
-                        rec_pop();
-                        show_recstat(recording);
-                    }
-                    continue;
-                }
-                if (code == KEY_UP || code == KEY_DOWN) {/* octave shift */
-                    if (code == KEY_UP   && oct < OCT_MAX) oct++;
-                    if (code == KEY_DOWN && oct > OCT_MIN) oct--;
-                    show_octave(oct);
-                    continue;
-                }
-            }
-
-            /* ---- SPACE = rest, only while recording ---- */
-            if (code == KEY_SPACE) {
-                if (st == KEY_STATE_PRESSED && sounding == 0 && recording) {
-                    sounding   = KEY_SPACE;
-                    press_ms   = plat_now_ms();
-                    press_lo   = 0;
-                    press_hi   = 0;
-                    press_spn[0] = '\0';
-                    show_note("-", 0, 0);
-                } else if (st == KEY_STATE_RELEASED && sounding == KEY_SPACE) {
-                    if (recording) {               /* skip if REC went off */
-                        rec_push(0, 0, clamp_ms(plat_now_ms() - press_ms), "");
-                        show_recstat(recording);
-                    }
-                    clear_band();
-                    sounding = 0;
-                }
-                continue;
-            }
-
-            /* ---- notes ---- */
-            if (st == KEY_STATE_PRESSED) {
-                if (sounding != 0)                       /* one key at a time */
-                    continue;
-
-                keymap_t m;
-                if (!map_key(code, mods, &m) || m.act != A_NOTE)
-                    continue;
-
-                uint32_t lo = m.left, hi = m.right;
-                if (!is_dtmf(&m)) {                      /* DTMF ignores arrows */
-                    lo = shift_octave(lo, oct);
-                    hi = shift_octave(hi, oct);
-                }
-
-                audio_play_sound(lo, hi);
-                show_note(m.label, lo, hi);
-                sounding = code;
-                press_ms = plat_now_ms();
-                /* lo == hi for a plain note; a DTMF key keeps its two tones */
-                press_lo = (uint16_t)lo;
-                press_hi = (uint16_t)hi;
-                make_spn(m.label, m.up8va, press_spn);
-            } else if (st == KEY_STATE_RELEASED) {
-                if (code == sounding) {
-                    audio_stop();
-                    if (recording) {
-                        rec_push(press_lo, press_hi,
-                                 clamp_ms(plat_now_ms() - press_ms), press_spn);
-                        show_recstat(recording);
-                    }
-                    clear_band();
-                    sounding = 0;
-                }
+                clear_band();
+                sounding = 0;
             }
         }
     }
@@ -640,13 +654,13 @@ static void go_bootsel(void)
     plat_bootsel();
 }
 
-/* plain reboot back into this program (ESC on the splash screen) */
-static void go_reboot(void)
+/* leave for the UF2 Loader menu (ESC or Q on the splash); does not return */
+static void go_loader(void)
 {
     audio_stop();
-    put_row(ROW_REBOOTING, "REBOOTING...", COL_YELLOW);
+    put_row(ROW_REBOOTING, "BACK TO THE LOADER...", COL_YELLOW);
     plat_sleep_ms(300);
-    plat_reboot();
+    plat_exit_to_loader();
 }
 
 static void drain_keys(void)
@@ -656,14 +670,14 @@ static void drain_keys(void)
 }
 
 /*
- *  Splash-screen ESC asks before it reboots: the recordings only live in
- *  RAM, so a reboot wipes every song row.  Returns true only for Y / y.
+ *  Splash-screen ESC or Q asks before it exits: the recordings only live in
+ *  RAM, so leaving wipes every song row.  Returns true only for Y / y.
  *  (wait_key() ignores bare modifiers and still sends '~' to BOOTSEL.)
  */
-static bool confirm_reboot(void)
+static bool confirm_exit(void)
 {
-    put_row(SPLASH_ROW_PROMPT, "REBOOT AND ERASE ALL RECORDINGS?", COL_YELLOW);
-    put_row(SPLASH_ROW_REBOOT, "PRESS Y TO REBOOT - ANY KEY STAYS", COL_WHITE);
+    put_row(SPLASH_ROW_PROMPT, "EXIT AND ERASE ALL RECORDINGS?", COL_YELLOW);
+    put_row(SPLASH_ROW_EXIT, "PRESS Y TO EXIT - ANY KEY STAYS", COL_WHITE);
     uint8_t k = wait_key();
     return k == 'y' || k == 'Y';
 }
@@ -683,10 +697,11 @@ static void wait_any_key(void)
             if (c == '~')
                 go_bootsel();            /* does not return */
 
-            /* ESC reboots the PicoCalc - but confirm first, it wipes songs */
-            if (c == KEY_ESC) {
-                if (confirm_reboot())
-                    go_reboot();         /* does not return */
+            /* ESC or Q leaves for the UF2 Loader, but confirm first: it wipes
+             * the songs */
+            if (c == KEY_ESC || c == 'q' || c == 'Q') {
+                if (confirm_exit())
+                    go_loader();         /* does not return */
                 splash_screen();         /* user stayed - repaint the splash */
                 drain_keys();
                 continue;

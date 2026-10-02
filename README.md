@@ -11,8 +11,9 @@ here under [`picocalc-text-starter-main/`](picocalc-text-starter-main/).
 ```
 music_maker.c               the program (code only)
 music_maker_const.h         every constant: limits, colours, screen positions, help text, data tables
-platform.h                  the whole interface to the machine: clock, sleep, BOOTSEL / reboot
+platform.h                  the whole interface to the machine: clock, sleep, BOOTSEL, exit to the loader
 platform_pico.c             platform.h on the Pico SDK (PicoCalc firmware)
+platform_pico_const.h       constants for platform_pico.c: the UF2 Loader hand-off values
 CMakeLists.txt              builds the firmware, reusing picocalc-text-starter-main/drivers/*
                             plus picocalc-text-starter-main/songs.c (built-in songs)
 desktop/                    Desktop (SDL2) build, Windows and Linux: CMakeLists.txt, shim_desktop.cmake
@@ -28,16 +29,17 @@ LICENSE, CHANGELOG.md        MIT licence; version history
 1. **Splash screen** – a double‑size **PICOCALC MUSIC MAKER** title with the
    version under it, a double‑size **BY THOMAS DZUBIN** with *Built heavily on
    code by Blair Leduc (picocalc‑text‑starter)* under it (wrapped to two lines),
-   then `PRESS ANY KEY TO START` and `or ESC to reboot (erases recordings)`
+   then `PRESS ANY KEY TO START` and `or ESC / Q to exit (erases recordings)`
    under that. (The big lines are the built‑in 8×10 font scaled 2× by
    `big_text()`.)
-   On this screen `ESC` reboots the PicoCalc (a plain reboot back into this
-   program) **after a `REBOOT AND ERASE ALL RECORDINGS?` Y/N prompt** – the
-   recordings are RAM‑only, so a reboot wipes them; `~` (SHIFT + backtick)
+   On this screen `ESC` or `Q` leaves for the **PicoCalc UF2 Loader** menu
+   **after an `EXIT AND ERASE ALL RECORDINGS?` Y/N prompt** – the recordings
+   are RAM‑only, so leaving wipes them (if the program was flashed straight to
+   the chip with no loader, it simply restarts); `~` (SHIFT + backtick)
    reboots into **BOOTSEL** mode; a bare SHIFT/CTRL is ignored and any other
    key continues.
-2. Any key opens the **Music Maker screen** (the main key loop, inline in
-   `main()`); `ESC` there breaks back out to the splash. A note sounds for as
+2. Any key opens the **Music Maker screen** (the main key loop, in
+   `music_screen()`); `ESC` there returns to the splash. A note sounds for as
    long as its key is held. The middle of the screen is **split left / right,
    one half per speaker**, headed `LEFT CHANNEL` / `RIGHT CHANNEL` with a thin
    divider between them: each half shows the note name large (with its
@@ -82,9 +84,9 @@ LICENSE, CHANGELOG.md        MIT licence; version history
    | `~` (SHIFT + backtick) | reboot the PicoCalc into **BOOTSEL** (USB drive) mode. Works here and on the splash screen. Intentionally **not** shown anywhere on the device UI – the two-key combo makes it hard to trigger by accident. |
 
    The table above is the **Music Maker screen**. On the **splash screen** the
-   same keys mean different things (see item 1): `ESC` reboots via
-   `watchdog_reboot()` after the erase‑confirm, `~` still goes to BOOTSEL, a
-   bare SHIFT/CTRL is ignored, and any other key opens the Music Maker screen.
+   same keys mean different things (see item 1): `ESC` or `Q` leaves for the
+   UF2 Loader after the erase‑confirm, `~` still goes to BOOTSEL, a bare
+   SHIFT/CTRL is ignored, and any other key opens the Music Maker screen.
 
    The current shift is shown near the top as `OCTAVE x2` / `OCTAVE /2` etc.
    Each press is a true octave (a factor of **2**), clamped to `/2` … `x8`;
@@ -217,7 +219,7 @@ halves, same as live). The octave‑up keys (`K` `L` `ENTER`, `I` `O` `P`, `,`
 ## Known limitations
 
 - **Nothing persists.** Recordings live only in RAM — a reboot or power‑off
-  wipes them, and both `ESC` on the splash and `~` reboot. Octave shift,
+  wipes them, and so do `ESC` / `Q` on the splash and `~`. Octave shift,
   selected song and the `\` note‑map also reset on every boot.
 - **`F3` / `F4` / `F5` (EDIT / SAVE / LOAD) are stubs** — they only flash a
   "not implemented" notice and beep. There is no on‑device save/load and no
@@ -264,9 +266,9 @@ cmake -B build -G Ninja
 cmake --build build
 ```
 
-The result is **`build/picocalc-music-maker-<chip>.uf2`** (`<chip>` is `RP2350` or `RP2040`, matching the board), which the build also copies
-to this folder as **`picocalc-music-maker-RP2040.uf2`** or
-**`picocalc-music-maker-RP2350.uf2`** (depending on the board), so both chips'
+The result is **`build/music-maker-<chip>.uf2`** (`<chip>` is `RP2350` or `RP2040`, matching the board), which the build also copies
+to this folder as **`music-maker-RP2040.uf2`** or
+**`music-maker-RP2350.uf2`** (depending on the board), so both chips'
 builds can sit side by side.
 
 > If your PicoCalc uses a **Pico 2 / RP2350**, configure with
@@ -284,7 +286,7 @@ cmake -S desktop -B build-windows -G Ninja
 ninja -C build-windows
 ```
 
-The result is **`picocalc-music-maker-Windows.exe`** in this folder. SDL2 is
+The result is **`music-maker-Windows.exe`** in this folder. SDL2 is
 linked statically, so it is a single file with no `SDL2.dll`. The PC keyboard
 takes the place of the PicoCalc's (the numeric keypad works too). `~` closes the
 program (there is no BOOTSEL on a PC), and ESC on the splash screen closes it
@@ -305,7 +307,7 @@ together.
     cmake -S desktop -B build-linux
     cmake --build build-linux
 
-Output: `picocalc-music-maker-Linux` and `libSDL2-2.0.so.0` in the top-level folder.
+Output: `music-maker-Linux` and `libSDL2-2.0.so.0` in the top-level folder.
 
 ## Flashing
 
@@ -313,7 +315,7 @@ Output: `picocalc-music-maker-Linux` and `libSDL2-2.0.so.0` in the top-level fol
    already running, press **`~`** / SHIFT + backtick – it reboots straight
    into BOOTSEL).
 2. Copy the `.uf2` onto the `RPI-RP2` / `RP2350` drive — your own
-   `build/picocalc-music-maker-<chip>.uf2`, or the matching board file from a
+   `build/music-maker-<chip>.uf2`, or the matching board file from a
    [release](https://github.com/Dzubin/picocalc-music-maker/releases).
 3. The PicoCalc restarts into the program.
 

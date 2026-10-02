@@ -7,6 +7,17 @@ the version here matches the `VERSION` define in `music_maker_const.h`.
 ## [Unreleased]
 
 ### Changed
+- Build outputs are named without the `picocalc-` prefix, since the chip or system
+  at the end of the name already says what they are for: `music-maker-RP2040.uf2`, `music-maker-RP2350.uf2`, `music-maker-Windows.exe` and `music-maker-Linux`.
+- Leaving: `ESC` or `Q` on the splash screen (after the erase-all-recordings
+  Y/N prompt) now exits to the PicoCalc UF2 Loader menu instead of rebooting back
+  into the program. It asks the loader for its menu through the watchdog scratch
+  registers; with no loader installed the program just restarts, and on a PC it
+  closes. `platform.h`'s `plat_reboot()` became `plat_exit_to_loader()`, with its
+  constants in the new `platform_pico_const.h`. `~` still goes to BOOTSEL.
+- Code layout: `main()` now sits right under the `#include`s (with forward
+  declarations for what it calls), and the Music Maker screen's key loop moved
+  out of it into `music_screen()`. No behaviour change.
 - Vendored `drivers/fat32.c`: `get_next_free_cluster()` now advances its search
   hint past the cluster it hands out (a local fix, not in upstream), so a long
   sequential write to the SD card no longer re-scans every cluster already given

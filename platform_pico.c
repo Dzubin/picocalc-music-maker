@@ -11,6 +11,7 @@
 #include "hardware/watchdog.h"
 
 #include "platform.h"
+#include "platform_pico_const.h"
 
 /* The vendored audio driver (audio.c) tests this flag in its blocking song
  * player, so it must exist for the link to succeed. The keyboard and serial
@@ -39,9 +40,12 @@ _Noreturn void plat_bootsel(void)
         tight_loop_contents();
 }
 
-_Noreturn void plat_reboot(void)
+_Noreturn void plat_exit_to_loader(void)
 {
-    watchdog_reboot(0, 0, 0);       /* pc = 0: normal boot from flash */
+    watchdog_hw->scratch[LOADER_SCRATCH_MODE] = LOADER_BOOT_MODE_SD;
+    watchdog_hw->scratch[LOADER_SCRATCH_ARGUMENT] = 0;
+    watchdog_hw->scratch[LOADER_SCRATCH_MAGIC] = LOADER_COMMAND_MAGIC;
+    watchdog_reboot(0, 0, LOADER_REBOOT_DELAY_MS);
     for (;;)
-        tight_loop_contents();
+        tight_loop_contents();      /* the reboot comes in a few ms */
 }
