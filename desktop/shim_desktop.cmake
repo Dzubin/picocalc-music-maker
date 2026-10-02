@@ -12,6 +12,7 @@
 #         TITLE    "My Program"                # window title
 #         SOURCES  ${TOP}/my_program.c ...     # the program and any vendored .c
 #         INCLUDES ${TOP} ${STARTER} ${STARTER}/drivers
+#         [DEFINES MY_FLAG ...]                # extra compile definitions
 #         [NO_AUDIO]                           # skip the audio shim (no audio.h needed)
 #     )
 #
@@ -26,7 +27,7 @@
 set(PICOCALC_SHIM_DIR ${CMAKE_CURRENT_LIST_DIR})
 
 function(picocalc_desktop_app)
-    cmake_parse_arguments(APP "NO_AUDIO" "NAME;TITLE" "SOURCES;INCLUDES" ${ARGN})
+    cmake_parse_arguments(APP "NO_AUDIO" "NAME;TITLE" "SOURCES;INCLUDES;DEFINES" ${ARGN})
     if(NOT APP_NAME OR NOT APP_SOURCES)
         message(FATAL_ERROR "picocalc_desktop_app: NAME and SOURCES are required")
     endif()
@@ -72,6 +73,7 @@ function(picocalc_desktop_app)
     # SDL_MAIN_HANDLED: keep the program's own main() (no SDL_main rewriting).
     target_compile_definitions(${TARGET_NAME} PRIVATE
         SDL_MAIN_HANDLED
+        ${APP_DEFINES}
         "SHIM_WINDOW_TITLE=\"${APP_TITLE}\""
     )
     target_compile_options(${TARGET_NAME} PRIVATE -Wall)
