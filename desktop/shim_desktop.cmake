@@ -12,6 +12,7 @@
 #         TITLE    "My Program"                # window title
 #         SOURCES  ${TOP}/my_program.c ...     # the program and any vendored .c
 #         INCLUDES ${TOP} ${STARTER} ${STARTER}/drivers
+#         [NO_AUDIO]                           # skip the audio shim (no audio.h needed)
 #     )
 #
 # INCLUDES must reach the vendored lcd.h, which shim.h includes. The shim
@@ -25,7 +26,7 @@
 set(PICOCALC_SHIM_DIR ${CMAKE_CURRENT_LIST_DIR})
 
 function(picocalc_desktop_app)
-    cmake_parse_arguments(APP "" "NAME;TITLE" "SOURCES;INCLUDES" ${ARGN})
+    cmake_parse_arguments(APP "NO_AUDIO" "NAME;TITLE" "SOURCES;INCLUDES" ${ARGN})
     if(NOT APP_NAME OR NOT APP_SOURCES)
         message(FATAL_ERROR "picocalc_desktop_app: NAME and SOURCES are required")
     endif()
@@ -48,12 +49,18 @@ function(picocalc_desktop_app)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(SDL2 REQUIRED sdl2)
 
-    add_executable(${TARGET_NAME}
-        ${APP_SOURCES}
+    set(SHIM_SOURCES
         ${PICOCALC_SHIM_DIR}/shim_core.c
         ${PICOCALC_SHIM_DIR}/shim_lcd.c
         ${PICOCALC_SHIM_DIR}/shim_input.c
-        ${PICOCALC_SHIM_DIR}/shim_audio.c
+    )
+    if(NOT APP_NO_AUDIO)
+        list(APPEND SHIM_SOURCES ${PICOCALC_SHIM_DIR}/shim_audio.c)
+    endif()
+
+    add_executable(${TARGET_NAME}
+        ${APP_SOURCES}
+        ${SHIM_SOURCES}
     )
 
     target_include_directories(${TARGET_NAME} PRIVATE
