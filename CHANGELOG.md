@@ -4,10 +4,11 @@ All notable changes to PicoCalc Music Maker.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 the version here matches the `VERSION` define in `music_maker_const.h`.
 
-## [0.01C] - Unreleased
+## [0.01C] - 2026-10-02
 
-`VERSION` in `music_maker_const.h` is now `V0.01C` (0.01B was never tagged, so
-its changes are part of this round); the heading gets a date when it's tagged.
+Release: <https://github.com/Dzubin/picocalc-music-maker/releases/tag/v0.01C>.
+`VERSION` in `music_maker_const.h` is `V0.01C` (0.01B was never tagged, so its
+changes are part of this release).
 
 ### Added
 - Windows build: `desktop/` holds a small SDL2 shim that re-implements the
