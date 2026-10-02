@@ -4,6 +4,16 @@ All notable changes to PicoCalc Music Maker.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 the version here matches the `VERSION` define in `music_maker_const.h`.
 
+## [Unreleased]
+
+### Changed
+- Desktop build: the build logic that every desktop `CMakeLists.txt` repeated
+  (SDL2 linking, output names, copying the result) moved into
+  `desktop/shim_desktop.cmake`; `desktop/CMakeLists.txt` now only names the
+  program and its sources. The shim files were refreshed from the shared copy
+  (comment wording; `hardware/watchdog.h` gained the scratch registers). No
+  behaviour change.
+
 ## [0.01C] - 2026-10-02
 
 Release: <https://github.com/Dzubin/picocalc-music-maker/releases/tag/v0.01C>.

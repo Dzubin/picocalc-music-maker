@@ -1,5 +1,5 @@
 /*
- * shim.h - internal interface between the pieces of the Windows (SDL2)
+ * shim.h - internal interface between the pieces of the desktop (SDL2)
  * PicoCalc shim: the window/timing core, the LCD, the keyboard and the audio.
  *
  * Author: Thomas Dzubin

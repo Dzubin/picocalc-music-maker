@@ -1,5 +1,5 @@
 /*
- * pico/bootrom.h - Windows stand-in. "Reboot to BOOTSEL" has no meaning on a
+ * pico/bootrom.h - desktop stand-in. "Reboot to BOOTSEL" has no meaning on a
  * PC, so reset_usb_boot() simply closes the program.
  *
  * Author: Thomas Dzubin

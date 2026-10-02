@@ -1,7 +1,7 @@
 /*
  * pico/stdlib.h - stand-in for the Raspberry Pi Pico SDK header of the same
  * name, so PicoCalc code (and the vendored picocalc-text-starter headers by
- * Blair Leduc) compile unchanged for Windows. Only the small slice of the SDK
+ * Blair Leduc) compile unchanged on the desktop. Only the small slice of the SDK
  * that these programs use is provided; the implementations are in
  * shim_core.c.
  *

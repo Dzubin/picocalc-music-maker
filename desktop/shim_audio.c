@@ -1,6 +1,6 @@
 /*
  * shim_audio.c - the picocalc-text-starter audio driver API (audio.h, by
- * Blair Leduc) re-implemented on SDL2 audio for the Windows build. Like the
+ * Blair Leduc) re-implemented on SDL2 audio for the desktop build. Like the
  * PicoCalc's PWM output, each channel is a square wave of the requested
  * frequency; 0 Hz is silence.
  *

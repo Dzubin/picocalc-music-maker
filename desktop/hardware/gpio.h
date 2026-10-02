@@ -1,5 +1,5 @@
 /*
- * hardware/gpio.h - Windows stand-in: pin muxing and direction calls do
+ * hardware/gpio.h - desktop stand-in: pin muxing and direction calls do
  * nothing on a PC.
  *
  * Author: Thomas Dzubin

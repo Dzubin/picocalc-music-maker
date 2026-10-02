@@ -1,7 +1,7 @@
 /*
  * shim_input.c - the PicoCalc south-bridge keyboard (southbridge.h / keyboard.h
  * from picocalc-text-starter by Blair Leduc) re-implemented on SDL key events
- * for the Windows build.
+ * for the desktop build.
  *
  * The hardware keyboard FIFO returns one 16-bit event per read: the state
  * (pressed / hold / released) in the high byte and the key code in the low

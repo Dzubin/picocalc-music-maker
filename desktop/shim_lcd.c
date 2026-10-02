@@ -1,6 +1,6 @@
 /*
  * shim_lcd.c - the picocalc-text-starter LCD driver API (lcd.h, by Blair
- * Leduc) re-implemented on a 320x320 RGB565 framebuffer for the Windows
+ * Leduc) re-implemented on a 320x320 RGB565 framebuffer for the desktop
  * (SDL2) build. Same function names and behaviour as drivers/lcd.c, minus the
  * SPI plumbing; the vendored fonts (font-8x10.c / font-5x10.c) are used as-is.
  *

@@ -15,8 +15,9 @@ platform.h                  the whole interface to the machine: clock, sleep, BO
 platform_pico.c             platform.h on the Pico SDK (PicoCalc firmware)
 CMakeLists.txt              builds the firmware, reusing picocalc-text-starter-main/drivers/*
                             plus picocalc-text-starter-main/songs.c (built-in songs)
-desktop/                    Desktop (SDL2) build, Windows and Linux: CMakeLists.txt, the small shim that
-                            stands in for the PicoCalc drivers, and platform_desktop.c
+desktop/                    Desktop (SDL2) build, Windows and Linux: CMakeLists.txt, shim_desktop.cmake
+                            (shared build logic), the small shim that stands in for the PicoCalc
+                            drivers, and platform_desktop.c
 pico_sdk_import.cmake        standard Pico SDK locator (copied from the starter)
 picocalc-text-starter-main/  vendored driver layer + songs.c (see License; do not edit)
 LICENSE, CHANGELOG.md        MIT licence; version history
