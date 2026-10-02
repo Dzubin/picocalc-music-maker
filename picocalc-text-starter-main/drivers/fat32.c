@@ -237,6 +237,14 @@ static fat32_error_t get_next_free_cluster(uint32_t *cluster)
         if (value == FAT32_FAT_ENTRY_FREE)
         {
             *cluster = i;
+            // Local fix by Thomas Dzubin, not in upstream: advance the search
+            // hint past the cluster just handed out. Without it, every later
+            // allocation in the same session re-scans (and re-reads from the
+            // SD card) every cluster already given out, because this is the
+            // only place fsinfo.next_free could ever move forward, while
+            // release_cluster_chain() already moves it backward on a free.
+            // A sequential write of several hundred KB otherwise looks hung.
+            fsinfo.next_free = i + 1;
             return FAT32_OK; // Found a free cluster
         }
     }

@@ -7,6 +7,10 @@ the version here matches the `VERSION` define in `music_maker_const.h`.
 ## [Unreleased]
 
 ### Changed
+- Vendored `drivers/fat32.c`: `get_next_free_cluster()` now advances its search
+  hint past the cluster it hands out (a local fix, not in upstream), so a long
+  sequential write to the SD card no longer re-scans every cluster already given
+  out and looks hung.
 - Desktop build: the build logic that every desktop `CMakeLists.txt` repeated
   (SDL2 linking, output names, copying the result) moved into
   `desktop/shim_desktop.cmake`; `desktop/CMakeLists.txt` now only names the

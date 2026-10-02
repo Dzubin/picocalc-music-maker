@@ -391,7 +391,11 @@ license at [`picocalc-text-starter-main/LICENSE`](picocalc-text-starter-main/LIC
 Copyright © 2025 Blair Leduc. The Raspberry Pi Pico SDK it builds against is
 licensed separately by Raspberry Pi Ltd. (BSD-3-Clause).
 
-The vendored copy is unchanged except for **one line** in
-`picocalc-text-starter-main/drivers/audio.pio`: the upper limit of
+The vendored copy is unchanged except for **two small changes**. In
+`picocalc-text-starter-main/drivers/audio.pio` the upper limit of
 `audio_pwm_is_not_silence()` was raised from 2000 Hz to 2115 Hz so the top C
-(about 2093 Hz) can sound. Everything else is exactly as downloaded.
+(about 2093 Hz) can sound. In `picocalc-text-starter-main/drivers/fat32.c`,
+`get_next_free_cluster()` now advances its search hint past the cluster it just
+handed out; without that, every later allocation re-scans the clusters already
+given out, and a long sequential write to the SD card looks hung. Everything
+else is exactly as downloaded.
