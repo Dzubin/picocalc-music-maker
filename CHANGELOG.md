@@ -6,6 +6,8 @@ the version here matches the `VERSION` define in `music_maker_const.h`.
 
 ## [Unreleased]
 
+## [0.01D] - 2026-10-02
+
 ### Changed
 - Build outputs are named without the `picocalc-` prefix, since the chip or system
   at the end of the name already says what they are for: `music-maker-RP2040.uf2`, `music-maker-RP2350.uf2`, `music-maker-Windows.exe` and `music-maker-Linux`.

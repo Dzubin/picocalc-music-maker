@@ -49,7 +49,7 @@ add_executable(picocalc-music-maker
 )
 
 pico_set_program_name(picocalc-music-maker "picocalc-music-maker")
-pico_set_program_version(picocalc-music-maker "0.01C")
+pico_set_program_version(picocalc-music-maker "0.01D")
 
 # Build the audio PIO program (generates audio.pio.h that drivers/audio.c needs)
 pico_generate_pio_header(picocalc-music-maker ${STARTER}/drivers/audio.pio)
