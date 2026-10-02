@@ -9,9 +9,14 @@ by **Blair Leduc** (LCD, audio and south‑bridge keyboard drivers) — vendored
 here under [`picocalc-text-starter-main/`](picocalc-text-starter-main/).
 
 ```
-music_maker.c               the whole program
-CMakeLists.txt              builds it, reusing picocalc-text-starter-main/drivers/*
+music_maker.c               the program (code only)
+music_maker_const.h         every constant: limits, colours, screen positions, help text, data tables
+platform.h                  the whole interface to the machine: clock, sleep, BOOTSEL / reboot
+platform_pico.c             platform.h on the Pico SDK (PicoCalc firmware)
+CMakeLists.txt              builds the firmware, reusing picocalc-text-starter-main/drivers/*
                             plus picocalc-text-starter-main/songs.c (built-in songs)
+desktop/                    Desktop (SDL2) build, Windows and Linux: CMakeLists.txt, the small shim that
+                            stands in for the PicoCalc drivers, and platform_desktop.c
 pico_sdk_import.cmake        standard Pico SDK locator (copied from the starter)
 picocalc-text-starter-main/  vendored driver layer + songs.c (see License; do not edit)
 LICENSE, CHANGELOG.md        MIT licence; version history
@@ -258,11 +263,48 @@ cmake -B build -G Ninja
 cmake --build build
 ```
 
-The result is **`build/picocalc-music-maker.uf2`**.
+The result is **`build/picocalc-music-maker-<chip>.uf2`** (`<chip>` is `RP2350` or `RP2040`, matching the board), which the build also copies
+to this folder as **`picocalc-music-maker-RP2040.uf2`** or
+**`picocalc-music-maker-RP2350.uf2`** (depending on the board), so both chips'
+builds can sit side by side.
 
 > If your PicoCalc uses a **Pico 2 / RP2350**, configure with
 > `-DPICO_BOARD=pico2` (or set it in the VS Code extension). For a Pico W use
 > `-DPICO_BOARD=pico_w`.
+
+### On Windows
+
+The same program also runs on a Windows PC through a small SDL2 layer in
+[`desktop/`](desktop/) that stands in for the PicoCalc's LCD, keyboard and
+audio drivers. From an MSYS2 UCRT64 shell with SDL2 installed:
+
+```bash
+cmake -S desktop -B build-windows -G Ninja
+ninja -C build-windows
+```
+
+The result is **`picocalc-music-maker-Windows.exe`** in this folder. SDL2 is
+linked statically, so it is a single file with no `SDL2.dll`. The PC keyboard
+takes the place of the PicoCalc's (the numeric keypad works too). `~` closes the
+program (there is no BOOTSEL on a PC), and ESC on the splash screen closes it
+after the same erase confirmation as on the PicoCalc; ESC on the music screen
+just returns to the splash. The PC build is not limited to the PicoCalc's
+100 to 2115 Hz audible window, so very high shifted notes that are silent on
+the device will sound on the PC.
+
+### Linux
+
+The same source builds on Linux with the SDL2 development package installed
+(for example `sudo apt install libsdl2-dev`). Unlike the Windows build, SDL2 is
+**not** linked in statically: the program links `libSDL2` dynamically, and the
+build copies that library next to the executable as `libSDL2-2.0.so.0`, where
+the executable finds it through an `$ORIGIN` run-path. Keep the two files
+together.
+
+    cmake -S desktop -B build-linux
+    cmake --build build-linux
+
+Output: `picocalc-music-maker-Linux` and `libSDL2-2.0.so.0` in the top-level folder.
 
 ## Flashing
 
@@ -270,7 +312,7 @@ The result is **`build/picocalc-music-maker.uf2`**.
    already running, press **`~`** / SHIFT + backtick – it reboots straight
    into BOOTSEL).
 2. Copy the `.uf2` onto the `RPI-RP2` / `RP2350` drive — your own
-   `build/picocalc-music-maker.uf2`, or the matching board file from a
+   `build/picocalc-music-maker-<chip>.uf2`, or the matching board file from a
    [release](https://github.com/Dzubin/picocalc-music-maker/releases).
 3. The PicoCalc restarts into the program.
 
@@ -347,3 +389,8 @@ by Blair Leduc (the LCD, audio and south-bridge keyboard drivers, plus
 license at [`picocalc-text-starter-main/LICENSE`](picocalc-text-starter-main/LICENSE),
 Copyright © 2025 Blair Leduc. The Raspberry Pi Pico SDK it builds against is
 licensed separately by Raspberry Pi Ltd. (BSD-3-Clause).
+
+The vendored copy is unchanged except for **one line** in
+`picocalc-text-starter-main/drivers/audio.pio`: the upper limit of
+`audio_pwm_is_not_silence()` was raised from 2000 Hz to 2115 Hz so the top C
+(about 2093 Hz) can sound. Everything else is exactly as downloaded.

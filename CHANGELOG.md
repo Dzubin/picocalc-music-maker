@@ -2,14 +2,46 @@
 
 All notable changes to PicoCalc Music Maker.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
-the version here matches the `VERSION` define in `music_maker.c`.
+the version here matches the `VERSION` define in `music_maker_const.h`.
 
-## [0.01B] - Unreleased
+## [0.01C] - Unreleased
 
-`VERSION` in `music_maker.c` is now `V0.01B`; changes for this round go here
-and the heading gets a date when it's tagged.
+`VERSION` in `music_maker_const.h` is now `V0.01C` (0.01B was never tagged, so
+its changes are part of this round); the heading gets a date when it's tagged.
 
-_Nothing yet._
+### Added
+- Windows build: `desktop/` holds a small SDL2 shim that re-implements the
+  picocalc-text-starter driver API (LCD, keyboard, audio) so the same
+  `music_maker.c` runs on a PC; SDL2 is linked statically, giving one
+  self-contained `picocalc-music-maker-Windows.exe`.
+- Linux build: the `desktop/` build (formerly `windows/`) now also builds on
+  Linux and produces `picocalc-music-maker-Linux`. SDL2 is linked dynamically there and the
+  build copies `libSDL2-2.0.so.0` next to the executable (found through an
+  `$ORIGIN` run-path); needs the SDL2 development package (e.g. `libsdl2-dev`).
+- Desktop build: the numeric keypad now works (digits, `.`, `*`, `/`, `+`,
+  `-`, `=`), so DTMF can be played from it.
+- The firmware build now names every output with the chip (the `.uf2`, `.elf`, `.bin` and `.hex` all end in `-RP2040` / `-RP2350`) and copies the `.uf2` to the top-level folder as
+  `picocalc-music-maker-RP2040.uf2` / `picocalc-music-maker-RP2350.uf2`, so the
+  two chips' builds sit side by side.
+
+### Changed
+- Code layout: every constant (limits, colours, screen row and column
+  positions, the help screen text, and the data tables) moved out of
+  `music_maker.c` into `music_maker_const.h`; the help screen is now drawn from
+  tables. No behaviour change.
+- `platform.h` is now the only interface to the machine (clock, sleep, BOOTSEL
+  and reboot), implemented in `platform_pico.c` (firmware) and
+  `desktop/platform_desktop.c` (PC); `music_maker.c` no longer includes Pico SDK
+  headers directly.
+- The README now says that the vendored `drivers/audio.pio` carries one patched
+  line (upper tone limit 2000 -> 2115 Hz).
+
+### Fixed
+- Firmware build: the post-build copy of the `.uf2` pointed at `/` instead of
+  the project folder, so the top-level `.uf2` would not have been refreshed.
+- `.gitignore` now also covers the desktop outputs copied to the top-level
+  folder (`*.exe`, `picocalc-music-maker-Linux`, `libSDL2-2.0.so.0`).
+- README: corrected how `~` and ESC behave in the desktop build.
 
 ## [0.01A] - 2026-09-03
 

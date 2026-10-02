@@ -19,6 +19,11 @@
  *  do NOT call picocalc_init() (which would start a background poll that
  *  drains that same FIFO).
  *
+ *  Two headers keep this file to code only: music_maker_const.h holds every
+ *  constant (limits, colours, screen positions, help text, data tables) and
+ *  platform.h is the whole interface to the machine (clock, sleep, reboot),
+ *  implemented per platform in platform_pico.c and desktop/platform_desktop.c.
+ *
  *  ------------------------------------------------------------------------
  *  Controls
  *  ------------------------------------------------------------------------
@@ -120,12 +125,10 @@
  *      ? .............. full-screen key reference; any key returns
  */
 
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-
-#include "pico/stdlib.h"
-#include "pico/bootrom.h"       /* reset_usb_boot() - BOOTSEL reboot ('~')    */
-#include "hardware/watchdog.h"  /* watchdog_reboot() - plain reboot (ESC)     */
 
 #include "lcd.h"          /* WIDTH, HEIGHT, GLYPH_HEIGHT, RGB(), lcd_*        */
 #include "audio.h"        /* audio_*(), PITCH_* freqs, NOTE_* durations      */
@@ -133,65 +136,8 @@
 #include "keyboard.h"     /* KEY_* codes, KEY_STATE_* values                 */
 #include "songs.h"        /* Blair Leduc's songs[] library (not modified)    */
 
-/* audio.c's audio_play_song_blocking() references this; define it so the
- * link is clean even though we never use that function.                     */
-volatile bool user_interrupt = false;
-
-/* ===================================================================== */
-/*  Compile-time configuration                                            */
-/* ===================================================================== */
-
-/* shown on the splash screen */
-#define VERSION "V0.01B"
-
-/* audio.pio only produces a tone for 100..2115 Hz (its upper bound was
- * raised from 2000 so the top C, C7 ~2093 Hz, can sound); outside that
- * range a shifted note is shown on screen but stays silent.                 */
-
-/* net up/down-arrow presses allowed: one octave (factor of 2) per press
- * - see shift_octave.  Down stops at -1 (/2): at /4 and /8 every note is
- * below the audio driver's 100 Hz floor, so there is nothing to hear. */
-#define OCT_MIN (-1)
-#define OCT_MAX ( 3)
-
-/* modifier-key bitmask for the SHIFT / CTRL note layer (see map_key) */
-#define MOD_SHIFT (1u << 0)
-#define MOD_CTRL  (1u << 1)
-
-/* element count of a fixed-size array */
-#define NELEMS(a) ((int)(sizeof (a) / sizeof (a)[0]))
-
-/* colours (RGB565 via the driver's RGB() macro) */
-#define COL_BG      RGB(  0,   0,   0)
-#define COL_WHITE   RGB(235, 235, 235)
-#define COL_RED     RGB(255,  90,  90)
-#define COL_GREEN   RGB( 90, 235, 130)
-#define COL_YELLOW  RGB(255, 225,  70)
-#define COL_CYAN    RGB(120, 225, 255)
-#define COL_GREY    RGB(200, 200, 200)
-
-/* text rows use the built-in 8x10 font from Blair Leduc's
- * picocalc-text-starter: 40 columns, 32 rows */
-#define TCOLS 40
-
-/* the big centre-screen note read-out lives in this pixel band (moved
- * down 25px from its original y=90 to make room for the "LEFT CHANNEL" /
- * "RIGHT CHANNEL" headers at BAND_HDR_ROW), split into a left-channel
- * half [0,HALF_W) and a right-channel half; each half's frequency line
- * sits on text row BAND_FROW.  Text is row-quantised (10px), so the
- * header/frequency rows land on the nearest row below the 25px-lower
- * glyph rather than at an exact +25px offset.                            */
-#define BAND_Y      115
-#define BAND_H      140
-#define HALF_W      (WIDTH / 2)
-#define BAND_HDR_ROW 10
-#define BAND_FROW    22
-
-/* recorder storage: REC_SONGS song rows (see song_t), each holding a
- * 30-char name and up to REC_LEN entries.  '=' selects the row; real
- * per-song record / play is a future addition.                           */
-#define REC_SONGS 12
-#define REC_LEN   200
+#include "platform.h"     /* clock, sleep, BOOTSEL / reboot (per platform)   */
+#include "music_maker_const.h"  /* every constant, screen position, table   */
 
 /* ===================================================================== */
 /*  Shared types                                                          */
@@ -207,26 +153,6 @@ typedef struct {
     char     label[4];  /* what to show on screen                             */
 } keymap_t;
 
-/*
- *  The 21 playable pitches (7 naturals, 7 sharps, 7 flats) live in one
- *  fixed table, tone_freq[]; map_key() looks a pitch up by TONE_* index.
- *  Enharmonic keys (e.g. D# and Eb) share one pitch - there are no split
- *  accidentals.  The octave choice for A and B (QUIRK note on map_key) is
- *  baked into the table.  The values are 12-TET, A4 = 440, from the
- *  driver's PITCH_* macros.
- */
-enum {
-    TONE_A,  TONE_B,  TONE_C,  TONE_D,  TONE_E,  TONE_F,  TONE_G,
-    TONE_AS, TONE_BS, TONE_CS, TONE_DS, TONE_ES, TONE_FS, TONE_GS,
-    TONE_AB, TONE_BB, TONE_CB, TONE_DB, TONE_EB, TONE_FB, TONE_GB,
-    NUM_TONES
-};
-
-/* the SHIFT / CTRL note layer reaches a sharp / flat by adding a fixed
- * offset to a natural slot, so the three rows must stay in this order */
-_Static_assert(TONE_AS == TONE_A + 7 && TONE_AB == TONE_A + 14,
-               "tone_freq[] must be naturals, then sharps, then flats (A..G)");
-
 typedef struct {
     uint16_t lo;      /* left-speaker frequency  in Hz; 0/0 = silence / rest  */
     uint16_t hi;      /* right-speaker frequency in Hz; == lo for plain notes,
@@ -240,57 +166,10 @@ typedef struct {
 /*  Global data                                                           */
 /* ===================================================================== */
 
-/*
- *  A small 5x7 font, used only for the big centre-screen note read-out.
- *  One byte per column, bit 0 = top pixel row.
- */
-static const uint8_t BIGFONT[96][5] = {
-    [' ' - 32] = {0x00, 0x00, 0x00, 0x00, 0x00},
-    ['!' - 32] = {0x00, 0x00, 0x5F, 0x00, 0x00},   /* busy-tone key         */
-    ['#' - 32] = {0x14, 0x7F, 0x14, 0x7F, 0x14},
-    ['$' - 32] = {0x24, 0x2A, 0x7F, 0x2A, 0x12},   /* dial-tone key         */
-    ['*' - 32] = {0x2A, 0x1C, 0x7F, 0x1C, 0x2A},
-    ['-' - 32] = {0x08, 0x08, 0x08, 0x08, 0x08},
-    ['/' - 32] = {0x20, 0x10, 0x08, 0x04, 0x02},
-    ['0' - 32] = {0x3E, 0x51, 0x49, 0x45, 0x3E},
-    ['1' - 32] = {0x00, 0x42, 0x7F, 0x40, 0x00},
-    ['2' - 32] = {0x42, 0x61, 0x51, 0x49, 0x46},
-    ['3' - 32] = {0x21, 0x41, 0x45, 0x4B, 0x31},
-    ['4' - 32] = {0x18, 0x14, 0x12, 0x7F, 0x10},
-    ['5' - 32] = {0x27, 0x45, 0x45, 0x45, 0x39},
-    ['6' - 32] = {0x3C, 0x4A, 0x49, 0x49, 0x30},
-    ['7' - 32] = {0x01, 0x71, 0x09, 0x05, 0x03},
-    ['8' - 32] = {0x36, 0x49, 0x49, 0x49, 0x36},
-    ['9' - 32] = {0x06, 0x49, 0x49, 0x29, 0x1E},
-    ['?' - 32] = {0x02, 0x01, 0x51, 0x09, 0x06},   /* unknown-pitch fallback */
-    ['@' - 32] = {0x3E, 0x41, 0x5D, 0x55, 0x5E},   /* ring-tone key         */
-    ['A' - 32] = {0x7E, 0x11, 0x11, 0x11, 0x7E},
-    ['B' - 32] = {0x7F, 0x49, 0x49, 0x49, 0x36},
-    ['C' - 32] = {0x3E, 0x41, 0x41, 0x41, 0x22},
-    ['D' - 32] = {0x7F, 0x41, 0x41, 0x22, 0x1C},
-    ['E' - 32] = {0x7F, 0x49, 0x49, 0x49, 0x41},
-    ['F' - 32] = {0x7F, 0x09, 0x09, 0x09, 0x01},
-    ['G' - 32] = {0x3E, 0x41, 0x49, 0x49, 0x7A},
-    ['b' - 32] = {0x7F, 0x48, 0x48, 0x48, 0x30},   /* lower-case b = flat */
-};
-
-/*
- *  Pitch (Hz) for each TONE_* slot - 12-tone equal temperament, A4 = 440.
- *  Rows, in order:
- *      A   B   C   D   E   F   G
- *      A#  B#  C#  D#  E#  F#  G#
- *      Ab  Bb  Cb  Db  Eb  Fb  Gb
- */
-static const uint16_t tone_freq[NUM_TONES] = {
-    PITCH_A3,  PITCH_B3,  PITCH_C4,  PITCH_D4,  PITCH_E4,  PITCH_F4,  PITCH_G4,
-    PITCH_AS3, PITCH_C4,  PITCH_CS4, PITCH_DS4, PITCH_F4,  PITCH_FS4, PITCH_GS4,
-    PITCH_GS3, PITCH_AS3, PITCH_B3,  PITCH_CS4, PITCH_DS4, PITCH_E4,  PITCH_FS4,
-};
-
 /* one recording row = a named song plus its take */
 typedef struct {
     char        name[31];         /* song name: 30 chars + NUL ("" = unnamed;
-                                   * no name-editing UI yet, so always "")   */
+                                   * only the built-in rows have names)      */
     int         count;            /* entries actually recorded, 0..REC_LEN;
                                    * F2 PLAY plays exactly this many          */
     rec_entry_t entry[REC_LEN];   /* the take - up to REC_LEN notes / rests  */
@@ -350,7 +229,6 @@ static uint32_t shift_octave(uint32_t f, int oct);
 static void show_octave(int oct);
 
 /* recorder */
-static uint32_t nowms(void);
 static uint16_t clamp_ms(uint32_t ms);
 static void rec_push(uint16_t lo, uint16_t hi, uint16_t dur_ms, const char *spn);
 static void rec_pop(void);
@@ -379,13 +257,17 @@ static void show_help(void);
 static void splash_screen(void)
 {
     lcd_clear_screen();
-    big_text_centered( 40, "PICOCALC MUSIC MAKER", 2, COL_CYAN);
-    put_row( 7, VERSION,                                COL_CYAN);
-    big_text_centered(110, "BY THOMAS DZUBIN",          2, COL_GREY);
-    put_row(14, "Built heavily on code by Blair Leduc", COL_GREY);
-    put_row(15, "(picocalc-text-starter)",              COL_GREY);
-    put_row(20, "PRESS ANY KEY TO START",               COL_WHITE);
-    put_row(21, "or ESC to reboot (erases recordings)", COL_GREY);
+    big_text_centered(SPLASH_TITLE_Y, "PICOCALC MUSIC MAKER", SPLASH_SCALE,
+                      COL_CYAN);
+    put_row(SPLASH_ROW_VERSION, VERSION, COL_CYAN);
+    big_text_centered(SPLASH_AUTHOR_Y, "BY THOMAS DZUBIN", SPLASH_SCALE,
+                      COL_GREY);
+    put_row(SPLASH_ROW_CREDIT_1, "Built heavily on code by Blair Leduc",
+            COL_GREY);
+    put_row(SPLASH_ROW_CREDIT_2, "(picocalc-text-starter)", COL_GREY);
+    put_row(SPLASH_ROW_PROMPT, "PRESS ANY KEY TO START", COL_WHITE);
+    put_row(SPLASH_ROW_REBOOT, "or ESC to reboot (erases recordings)",
+            COL_GREY);
 }
 
 /* ===================================================================== */
@@ -397,7 +279,7 @@ static void splash_screen(void)
 /* ===================================================================== */
 int main(void)
 {
-    stdio_init_all();
+    plat_init();
 
     sb_init();               /* keyboard / south-bridge I2C (no bg poll) */
     lcd_init();               /* ST7365P LCD */
@@ -413,8 +295,8 @@ int main(void)
         /* ------------------------------------------------------------- */
         /*  Music Maker main loop screen                                 */
         /* ------------------------------------------------------------- */
-        int      oct       = 0;   /* net up-presses: + multiplies, - divides pitch */
-        uint8_t  sounding   = 0;  /* key code of the note / rest in progress, 0=none */
+        int      oct       = 0;   /* net UP presses: + multiplies, - divides */
+        uint8_t  sounding   = 0;  /* key code of the note or rest held, 0=none */
         uint32_t press_ms   = 0;  /* when the in-progress key went down */
         uint16_t press_lo   = 0;  /* left  freq to record for it (0 for a rest) */
         uint16_t press_hi   = 0;  /* right freq to record for it (0 for a rest) */
@@ -427,7 +309,7 @@ int main(void)
         for (;;) {
             uint16_t e = key_event();
             if (!e) {
-                sleep_ms(2);
+                plat_sleep_ms(2);
                 continue;
             }
 
@@ -476,7 +358,7 @@ int main(void)
                 }
                 if (code == KEY_F3) {                    /* EDIT - not done yet */
                     not_implemented("EDIT");
-                    mods = 0;               /* the notice's drain ate mod releases */
+                    mods = 0;               /* the drain ate mod releases */
                     continue;
                 }
                 if (code == KEY_F4) {                    /* SAVE - not done yet */
@@ -489,24 +371,24 @@ int main(void)
                     mods = 0;
                     continue;
                 }
-                if (code == KEY_DEL) {                   /* CLEAR (asks Y/N first) */
+                if (code == KEY_DEL) {                   /* CLEAR (asks Y/N) */
                     confirm_and_clear(&recording);
                     mods = 0;
                     continue;
                 }
-                if (code == '?') {                       /* help screen (SHIFT + /) */
+                if (code == '?') {                       /* help (SHIFT + /) */
                     show_help();
                     draw_screen(oct, recording);
                     mods = 0;               /* help's key-wait ate mod releases */
                     continue;
                 }
-                if (code == '=') {                       /* cycle selected song 0..11 */
+                if (code == '=') {                       /* next song 0..11 */
                     cur_song = (cur_song + 1) % REC_SONGS;
                     show_song();
                     show_recstat(recording);   /* note count is per-song now */
                     continue;
                 }
-                if (code == '\\') {                      /* toggle note-key layout */
+                if (code == '\\') {                      /* switch key layout */
                     note_map = (note_map == MAP_FULL) ? MAP_LETTERS : MAP_FULL;
                     show_notemap();
                     continue;
@@ -518,7 +400,7 @@ int main(void)
                     }
                     continue;
                 }
-                if (code == KEY_UP || code == KEY_DOWN) {/* octave shift (future notes) */
+                if (code == KEY_UP || code == KEY_DOWN) {/* octave shift */
                     if (code == KEY_UP   && oct < OCT_MAX) oct++;
                     if (code == KEY_DOWN && oct > OCT_MIN) oct--;
                     show_octave(oct);
@@ -530,14 +412,14 @@ int main(void)
             if (code == KEY_SPACE) {
                 if (st == KEY_STATE_PRESSED && sounding == 0 && recording) {
                     sounding   = KEY_SPACE;
-                    press_ms   = nowms();
+                    press_ms   = plat_now_ms();
                     press_lo   = 0;
                     press_hi   = 0;
                     press_spn[0] = '\0';
                     show_note("-", 0, 0);
                 } else if (st == KEY_STATE_RELEASED && sounding == KEY_SPACE) {
-                    if (recording) {               /* skip if REC stopped mid-hold */
-                        rec_push(0, 0, clamp_ms(nowms() - press_ms), "");
+                    if (recording) {               /* skip if REC went off */
+                        rec_push(0, 0, clamp_ms(plat_now_ms() - press_ms), "");
                         show_recstat(recording);
                     }
                     clear_band();
@@ -556,7 +438,7 @@ int main(void)
                     continue;
 
                 uint32_t lo = m.left, hi = m.right;
-                if (!is_dtmf(&m)) {                      /* arrows don't touch DTMF */
+                if (!is_dtmf(&m)) {                      /* DTMF ignores arrows */
                     lo = shift_octave(lo, oct);
                     hi = shift_octave(hi, oct);
                 }
@@ -564,16 +446,17 @@ int main(void)
                 audio_play_sound(lo, hi);
                 show_note(m.label, lo, hi);
                 sounding = code;
-                press_ms = nowms();
-                press_lo = (uint16_t)lo;                /* both channels: equal for a */
-                press_hi = (uint16_t)hi;                /* plain note, the DTMF pair  */
-                make_spn(m.label, m.up8va, press_spn);  /* otherwise                  */
+                press_ms = plat_now_ms();
+                /* lo == hi for a plain note; a DTMF key keeps its two tones */
+                press_lo = (uint16_t)lo;
+                press_hi = (uint16_t)hi;
+                make_spn(m.label, m.up8va, press_spn);
             } else if (st == KEY_STATE_RELEASED) {
                 if (code == sounding) {
                     audio_stop();
                     if (recording) {
                         rec_push(press_lo, press_hi,
-                                 clamp_ms(nowms() - press_ms), press_spn);
+                                 clamp_ms(plat_now_ms() - press_ms), press_spn);
                         show_recstat(recording);
                     }
                     clear_band();
@@ -635,7 +518,7 @@ static void put_row(int row, const char *str, uint16_t fg)
 static void put_at(int x_px, int row, const char *str, uint16_t fg)
 {
     lcd_set_foreground(fg);
-    lcd_putstr((uint8_t)(x_px / 8), (uint8_t)row, str);
+    lcd_putstr((uint8_t)(x_px / FONT_W), (uint8_t)row, str);
 }
 
 /*
@@ -646,10 +529,10 @@ static void put_at(int x_px, int row, const char *str, uint16_t fg)
  */
 static void big_text(int x_px, int y_px, const char *s, int scale, uint16_t fg)
 {
-    for (; *s; s++, x_px += 8 * scale) {
+    for (; *s; s++, x_px += FONT_W * scale) {
         const uint8_t *g = &font_8x10.glyphs[(uint8_t)*s * GLYPH_HEIGHT];
         for (int row = 0; row < GLYPH_HEIGHT; row++)
-            for (int col = 0; col < 8; col++)
+            for (int col = 0; col < FONT_W; col++)
                 if (g[row] & (0x80u >> col))
                     fill(fg, x_px + col * scale, y_px + row * scale, scale, scale);
     }
@@ -658,7 +541,7 @@ static void big_text(int x_px, int y_px, const char *s, int scale, uint16_t fg)
 /* big_text, horizontally centred on the screen */
 static void big_text_centered(int y_px, const char *s, int scale, uint16_t fg)
 {
-    int w = (int)strlen(s) * 8 * scale;
+    int w = (int)strlen(s) * FONT_W * scale;
     big_text((WIDTH - w) / 2, y_px, s, scale, fg);
 }
 
@@ -698,11 +581,11 @@ static void draw_half(int x0, const char *label, uint32_t freq, int frow)
 
     char buf[16];
     int  n   = snprintf(buf, sizeof buf, "%lu Hz", (unsigned long)freq);
-    int  c0  = x0 / 8;
-    int  col = c0 + (HALF_W / 8 - n) / 2;
+    int  c0  = x0 / FONT_W;
+    int  col = c0 + (HALF_W / FONT_W - n) / 2;
     if (col < c0)
         col = c0;
-    put_at(col * 8, frow, buf, COL_CYAN);
+    put_at(col * FONT_W, frow, buf, COL_CYAN);
 }
 
 /*
@@ -748,31 +631,28 @@ static inline bool is_mod_key(uint8_t c)
            c == KEY_MOD_ALT || c == KEY_MOD_SYM;
 }
 
+/* reboot into BOOTSEL (USB drive) mode; does not return */
 static void go_bootsel(void)
 {
     audio_stop();
-    put_row(15, "REBOOTING TO BOOTSEL...", COL_YELLOW);
-    sleep_ms(300);
-    reset_usb_boot(0, 0);
-    while (1)
-        tight_loop_contents();
+    put_row(ROW_REBOOTING, "REBOOTING TO BOOTSEL...", COL_YELLOW);
+    plat_sleep_ms(300);
+    plat_bootsel();
 }
 
 /* plain reboot back into this program (ESC on the splash screen) */
 static void go_reboot(void)
 {
     audio_stop();
-    put_row(15, "REBOOTING...", COL_YELLOW);
-    sleep_ms(300);
-    watchdog_reboot(0, 0, 0);      /* pc = 0 -> normal flash boot */
-    while (1)
-        tight_loop_contents();
+    put_row(ROW_REBOOTING, "REBOOTING...", COL_YELLOW);
+    plat_sleep_ms(300);
+    plat_reboot();
 }
 
 static void drain_keys(void)
 {
     while (key_event() != 0)
-        tight_loop_contents();
+        ;                       /* reading the FIFO empties it */
 }
 
 /*
@@ -782,8 +662,8 @@ static void drain_keys(void)
  */
 static bool confirm_reboot(void)
 {
-    put_row(20, "REBOOT AND ERASE ALL RECORDINGS?", COL_YELLOW);
-    put_row(21, "PRESS Y TO REBOOT - ANY KEY STAYS", COL_WHITE);
+    put_row(SPLASH_ROW_PROMPT, "REBOOT AND ERASE ALL RECORDINGS?", COL_YELLOW);
+    put_row(SPLASH_ROW_REBOOT, "PRESS Y TO REBOOT - ANY KEY STAYS", COL_WHITE);
     uint8_t k = wait_key();
     return k == 'y' || k == 'Y';
 }
@@ -816,7 +696,7 @@ static void wait_any_key(void)
             drain_keys();
             return;
         }
-        sleep_ms(3);
+        plat_sleep_ms(3);
     }
 }
 
@@ -840,7 +720,7 @@ static uint8_t wait_key(void)
                 return c;
             }
         }
-        sleep_ms(3);
+        plat_sleep_ms(3);
     }
 }
 
@@ -1039,10 +919,11 @@ static bool map_key(uint8_t code, uint8_t mods, keymap_t *m)
     case '*': m->act = A_NOTE; m->left = 941; m->right = 1209; strcpy(m->label, "*"); return true;
     case '#': m->act = A_NOTE; m->left = 941; m->right = 1477; strcpy(m->label, "#"); return true;
 
-    /* North American telephone call-progress tones (fixed, like DTMF) */
-    case '!': m->act = A_NOTE; m->left = 480; m->right = 620; strcpy(m->label, "!"); return true; /* busy */
-    case '@': m->act = A_NOTE; m->left = 440; m->right = 480; strcpy(m->label, "@"); return true; /* ring */
-    case '$': m->act = A_NOTE; m->left = 350; m->right = 440; strcpy(m->label, "$"); return true; /* dial */
+    /* North American telephone call-progress tones (fixed, like DTMF):
+     * busy, ring and dial.                                                 */
+    case '!': m->act = A_NOTE; m->left = 480; m->right = 620; strcpy(m->label, "!"); return true;
+    case '@': m->act = A_NOTE; m->left = 440; m->right = 480; strcpy(m->label, "@"); return true;
+    case '$': m->act = A_NOTE; m->left = 350; m->right = 440; strcpy(m->label, "$"); return true;
 
     default:
         return false;
@@ -1104,17 +985,12 @@ static void show_octave(int oct)
     if (oct > 0)      snprintf(b, sizeof b, "OCTAVE  x%u", factor);
     else if (oct < 0) snprintf(b, sizeof b, "OCTAVE  /%u", factor);
     else              strcpy(b, "OCTAVE  x1");
-    put_row(8, b, COL_GREEN);
+    put_row(ROW_OCTAVE, b, COL_GREEN);
 }
 
 /* ===================================================================== */
 /*  Recorder  (F1 = record toggle, F2 = play, DEL = clear, Back = undo)    */
 /* ===================================================================== */
-
-static uint32_t nowms(void)
-{
-    return to_ms_since_boot(get_absolute_time());
-}
 
 /* hold time in ms, clamped to the 1..65535 range the recorder stores */
 static uint16_t clamp_ms(uint32_t ms)
@@ -1134,7 +1010,7 @@ static void rec_push(uint16_t lo, uint16_t hi, uint16_t dur_ms, const char *spn)
     song_t *s = &recbuf[cur_song];
     if (s->count >= REC_LEN) {
         audio_play_sound(1000, 1000);      /* "recording full" chirp */
-        sleep_ms(60);
+        plat_sleep_ms(60);
         audio_stop();
         return;
     }
@@ -1166,7 +1042,8 @@ static void show_recstat(bool recording)
     else
         snprintf(b, sizeof b, "STOPPED   %d NOTES%s", n, tail);
 
-    put_row(6, b, full ? COL_YELLOW : (recording ? COL_RED : COL_GREY));
+    put_row(ROW_RECSTAT, b,
+            full ? COL_YELLOW : (recording ? COL_RED : COL_GREY));
 }
 
 /*
@@ -1180,8 +1057,8 @@ static void show_recstat(bool recording)
 static void show_reckeys(bool recording)
 {
     uint16_t col = recording ? COL_YELLOW : COL_GREY;
-    put_row(28, "BACK KEY = DELETE LAST NOTE",     col);
-    put_row(29, "SPACE = RECORD A REST (SILENCE)", col);
+    put_row(ROW_RECKEY_BACK,  "BACK KEY = DELETE LAST NOTE",     col);
+    put_row(ROW_RECKEY_SPACE, "SPACE = RECORD A REST (SILENCE)", col);
 }
 
 /* selected-song line (row 7): the cur_song index and that row's name in
@@ -1190,7 +1067,7 @@ static void show_song(void)
 {
     char b[48];
     snprintf(b, sizeof b, "SONG %d \"%s\"", cur_song, recbuf[cur_song].name);
-    put_row(7, b, COL_CYAN);
+    put_row(ROW_SONG, b, COL_CYAN);
 }
 
 /*
@@ -1212,16 +1089,16 @@ static void show_play(int idx, int total, const rec_entry_t *e)
      * worst case the compiler assumes for "%d / %d" (two full ints).      */
     char buf[27];
     if (e->dur_ms > 99990)
-        put_row(BAND_FROW + 1, ".....", COL_WHITE);
+        put_row(ROW_PLAY_LENGTH, ".....", COL_WHITE);
     else {
         snprintf(buf, sizeof buf, "%02u.%02u SEC",
                  (unsigned)(e->dur_ms / 1000),
                  (unsigned)((e->dur_ms % 1000) / 10));
-        put_row(BAND_FROW + 1, buf, COL_WHITE);
+        put_row(ROW_PLAY_LENGTH, buf, COL_WHITE);
     }
 
     snprintf(buf, sizeof buf, "%d / %d", idx, total);
-    put_row(BAND_FROW + 2, buf, COL_GREY);
+    put_row(ROW_PLAY_COUNT, buf, COL_GREY);
 }
 
 /* F2: play every recorded entry for its stored duration */
@@ -1231,11 +1108,11 @@ static void play_recording(void)
 
     int count = recbuf[cur_song].count;    /* play exactly this song's length */
     if (count == 0) {
-        put_row(6, "NOTHING RECORDED YET", COL_YELLOW);
+        put_row(ROW_RECSTAT, "NOTHING RECORDED YET", COL_YELLOW);
         return;
     }
 
-    put_row(6, "PLAYING BACK...", COL_GREEN);
+    put_row(ROW_RECSTAT, "PLAYING BACK...", COL_GREEN);
     drain_keys();
 
     for (int i = 0; i < count; i++) {
@@ -1245,9 +1122,9 @@ static void play_recording(void)
         if (r->lo || r->hi)
             audio_play_sound(r->lo, r->hi);
 
-        uint32_t end  = nowms() + r->dur_ms;
+        uint32_t end  = plat_now_ms() + r->dur_ms;
         bool     stop = false;
-        while ((int32_t)(end - nowms()) > 0) {
+        while ((int32_t)(end - plat_now_ms()) > 0) {
             uint16_t e = key_event();
             if (e && ev_state(e) == KEY_STATE_PRESSED) {
                 uint8_t k = ev_code(e);
@@ -1258,12 +1135,12 @@ static void play_recording(void)
                     break;
                 }
             }
-            sleep_ms(3);
+            plat_sleep_ms(3);
         }
         audio_stop();
         if (stop)
             break;
-        sleep_ms(40);                      /* short gap between entries */
+        plat_sleep_ms(40);                      /* short gap between entries */
     }
 
     clear_band();
@@ -1275,23 +1152,11 @@ static void play_recording(void)
 /* ===================================================================== */
 
 /*
- *  Reverse of the audio.h PITCH_* macros: exact-match frequency -> its
- *  scientific-pitch-notation name, used to fill each pre-loaded entry's
- *  `spn` (the big glyph F2 PLAY shows).  Covers octaves 3..5, which is
- *  everything the songs use; anything else (or SILENCE) returns "".
+ *  Reverse of the audio.h PITCH_* macros (the spn_map[] table): an exact
+ *  frequency maps to its scientific-pitch-notation name, used to fill each
+ *  pre-loaded entry's `spn` (the big glyph F2 PLAY shows).  Anything the
+ *  table does not cover, including SILENCE, returns "".
  */
-static const struct { uint16_t hz; const char *spn; } spn_map[] = {
-    { PITCH_C3,  "C3"  }, { PITCH_CS3, "C#3" }, { PITCH_D3,  "D3"  }, { PITCH_DS3, "D#3" },
-    { PITCH_E3,  "E3"  }, { PITCH_F3,  "F3"  }, { PITCH_FS3, "F#3" }, { PITCH_G3,  "G3"  },
-    { PITCH_GS3, "G#3" }, { PITCH_A3,  "A3"  }, { PITCH_AS3, "A#3" }, { PITCH_B3,  "B3"  },
-    { PITCH_C4,  "C4"  }, { PITCH_CS4, "C#4" }, { PITCH_D4,  "D4"  }, { PITCH_DS4, "D#4" },
-    { PITCH_E4,  "E4"  }, { PITCH_F4,  "F4"  }, { PITCH_FS4, "F#4" }, { PITCH_G4,  "G4"  },
-    { PITCH_GS4, "G#4" }, { PITCH_A4,  "A4"  }, { PITCH_AS4, "A#4" }, { PITCH_B4,  "B4"  },
-    { PITCH_C5,  "C5"  }, { PITCH_CS5, "C#5" }, { PITCH_D5,  "D5"  }, { PITCH_DS5, "D#5" },
-    { PITCH_E5,  "E5"  }, { PITCH_F5,  "F5"  }, { PITCH_FS5, "F#5" }, { PITCH_G5,  "G5"  },
-    { PITCH_GS5, "G#5" }, { PITCH_A5,  "A5"  }, { PITCH_AS5, "A#5" }, { PITCH_B5,  "B5"  },
-};
-
 static const char *freq_to_spn(uint16_t hz)
 {
     for (int i = 0; i < NELEMS(spn_map); i++)
@@ -1344,11 +1209,11 @@ static void not_implemented(const char *what)
 {
     char b[40];
     snprintf(b, sizeof b, "%s FUNCTION NOT YET IMPLEMENTED", what);
-    put_row(30, b, COL_RED);
+    put_row(ROW_NOTICE, b, COL_RED);
     audio_play_sound(1000, 1000);
-    sleep_ms(500);
+    plat_sleep_ms(500);
     audio_stop();
-    clear_row(30);
+    clear_row(ROW_NOTICE);
     drain_keys();
 }
 
@@ -1370,7 +1235,7 @@ static void confirm_and_clear(bool *recording)
 
     char b[40];
     snprintf(b, sizeof b, "DELETE RECORDING %d (Y/N)", cur_song);
-    put_row(BAND_FROW - 4, b, COL_YELLOW);
+    put_row(ROW_CONFIRM, b, COL_YELLOW);
 
     uint8_t k = wait_key();
     if (k == 'y' || k == 'Y') {
@@ -1390,61 +1255,38 @@ static void confirm_and_clear(bool *recording)
  *  The PLAY NOTES block has two forms - FULL vs A-G - matching whichever
  *  note_map is live when '?' is pressed.
  */
+static void draw_help_lines(const help_line_t *lines, int count)
+{
+    for (int i = 0; i < count; i++)
+        put_at(HELP_X, lines[i].row, lines[i].text,
+               lines[i].heading ? COL_YELLOW : COL_WHITE);
+}
+
 static void show_help(void)
 {
     audio_stop();
     lcd_clear_screen();
-    put_row(0, "PICOCALC MUSIC MAKER  -  HELP", COL_CYAN);
+    put_row(HELP_ROW_TITLE, "PICOCALC MUSIC MAKER  -  HELP", COL_CYAN);
 
     /* the PLAY NOTES block depends on the live note_map ('\' toggles it) */
-    if (note_map == MAP_LETTERS) {
-        put_at(8,  2, "PLAY NOTES  (A-G MAP)",             COL_YELLOW);
-        put_at(8,  3, "A B C D E F G   PLAY NOTES A-G",    COL_WHITE);
-        put_at(8,  4, "SHIFT + KEY     SHARP OF THAT KEY", COL_WHITE);
-        put_at(8,  5, "CTRL  + KEY     FLAT  OF THAT KEY", COL_WHITE);
-        put_at(8,  6, "\\ (BACKSLASH)   SWITCH NOTE-KEY MAP", COL_WHITE);
-    } else {
-        put_at(8,  2, "PLAY NOTES  (FULL MAP)",            COL_YELLOW);
-        put_at(8,  3, "A S D F G H J   NATURALS A-G",      COL_WHITE);
-        put_at(8,  4, "K L ENTER       + 1 OCTAVE",        COL_WHITE);
-        put_at(8,  5, "Q W E R T Y U   SHARPS  A#-G#",     COL_WHITE);
-        put_at(8,  6, "I O P           SHARPS  + 1 OCT",   COL_WHITE);
-        put_at(8,  7, "Z X C V B N M   FLATS   Ab-Gb",     COL_WHITE);
-        put_at(8,  8, ", .             FLATS   + 1 OCT",   COL_WHITE);
-        put_at(8,  9, "SHIFT + KEY     SHARP OF THAT KEY", COL_WHITE);
-        put_at(8, 10, "CTRL  + KEY     FLAT  OF THAT KEY", COL_WHITE);
-        put_at(8, 11, "\\ (BACKSLASH)   SWITCH NOTE-KEY MAP", COL_WHITE);
-    }
+    if (note_map == MAP_LETTERS)
+        draw_help_lines(help_notes_letters, NELEMS(help_notes_letters));
+    else
+        draw_help_lines(help_notes_full, NELEMS(help_notes_full));
+    draw_help_lines(help_common, NELEMS(help_common));
 
-    put_at(8, 13, "PHONE TONES  (FIXED, LEFT / RIGHT)", COL_YELLOW);
-    put_at(8, 14, "0-9 # *         DTMF DIAL TONES",   COL_WHITE);
-    put_at(8, 15, "! @ $           BUSY  RING  DIAL",  COL_WHITE);
-
-    put_at(8, 16, "OCTAVE / MISC",                     COL_YELLOW);
-    put_at(8, 17, "UP ARROW        GO UP AN OCTAVE",   COL_WHITE);
-    put_at(8, 18, "DOWN ARROW      GO DOWN AN OCTAVE", COL_WHITE);
-    put_at(8, 19, "=               SONG 0-11 (2-11 DEMO)", COL_WHITE);
-    put_at(8, 20, "ESC             BACK TO SPLASH",    COL_WHITE);
-    put_at(8, 21, "?               THIS HELP",         COL_WHITE);
-    put_at(8, 22, "~               REBOOT TO BOOTSEL", COL_WHITE);
-
-    put_at(8, 24, "RECORDER",                          COL_YELLOW);
-    put_at(8, 25, "F1 / F2         RECORD / PLAY",     COL_WHITE);
-    put_at(8, 26, "SPACE  BACK     REST / UNDO",       COL_WHITE);
-    put_at(8, 27, "DEL             CLEAR  (ASKS Y/N)", COL_WHITE);
-
-    put_row(31, "PRESS ANY KEY TO RETURN", COL_WHITE);
+    put_row(HELP_ROW_PROMPT, "PRESS ANY KEY TO RETURN", COL_WHITE);
 
     wait_key();
 }
 
-/* note-map indicator (row 9): which musical-note key layout '\' selected */
+/* note-map indicator: which musical-note key layout '\' selected */
 static void show_notemap(void)
 {
     if (note_map == MAP_LETTERS)
-        put_row(9, "NOTE KEYS  A-G ONLY   \\ SWITCHES",   COL_CYAN);
+        put_row(ROW_NOTEMAP, "NOTE KEYS  A-G ONLY   \\ SWITCHES", COL_CYAN);
     else
-        put_row(9, "NOTE KEYS  FULL LAYOUT   \\ SWITCHES", COL_CYAN);
+        put_row(ROW_NOTEMAP, "NOTE KEYS  FULL LAYOUT   \\ SWITCHES", COL_CYAN);
 }
 
 /* clear the screen and paint the whole Music Maker view (static text plus
@@ -1467,24 +1309,27 @@ static void draw_screen(int oct, bool recording)
 /* ===================================================================== */
 static void draw_static_text(void)
 {
-    put_row(2,  "PICOCALC MUSIC MAKER (BY THOMAS DZUBIN)", COL_CYAN);
-    put_row(3,  "PRESS LETTER KEYS TO PLAY NOTES",     COL_WHITE);
-    put_row(4,  "USE UP/DOWN ARROW TO CHANGE OCTAVES", COL_WHITE);
-    put_row(5,  "\"=\" KEY SELECTS SONG STORAGE SLOT 0-11", COL_WHITE);
+    put_row(ROW_TITLE, "PICOCALC MUSIC MAKER (BY THOMAS DZUBIN)", COL_CYAN);
+    put_row(ROW_TIP_NOTES, "PRESS LETTER KEYS TO PLAY NOTES", COL_WHITE);
+    put_row(ROW_TIP_OCTAVE, "USE UP/DOWN ARROW TO CHANGE OCTAVES", COL_WHITE);
+    put_row(ROW_TIP_SONG, "\"=\" KEY SELECTS SONG STORAGE SLOT 0-11", COL_WHITE);
     /* the ~ (SHIFT + backtick) BOOTSEL reboot is deliberately not shown */
-    /* dynamic status lines: row 6 recstat, row 7 song, row 8 octave,
-     * row 9 note-map (see show_notemap)                                 */
+    /* the status lines (ROW_RECSTAT .. ROW_NOTEMAP) are painted by the
+     * show_* functions, not here                                         */
     /* headers over the split note band (see BAND_Y / BAND_HDR_ROW); drawn
      * once here since nothing else ever writes to this row               */
-    put_at( 4 * 8, BAND_HDR_ROW, "LEFT CHANNEL",  COL_GREY);
-    put_at(23 * 8, BAND_HDR_ROW, "RIGHT CHANNEL", COL_GREY);
-    put_row(27, "DEL=CLEAR   ESC=SPLASH   ?=HELP",  COL_GREY);
-    /* rows 28-29 are the recording-only edit keys - painted by
-     * show_reckeys(), which brightens them while RECORD is on           */
+    put_at(CHANNEL_HDR_LEFT_COL * FONT_W, BAND_HDR_ROW, "LEFT CHANNEL",
+           COL_GREY);
+    put_at(CHANNEL_HDR_RIGHT_COL * FONT_W, BAND_HDR_ROW, "RIGHT CHANNEL",
+           COL_GREY);
+    put_row(ROW_KEYS_HINT, "DEL=CLEAR   ESC=SPLASH   ?=HELP", COL_GREY);
+    /* the recording-only edit keys (ROW_RECKEY_BACK / _SPACE) are painted
+     * by show_reckeys(), which brightens them while RECORD is on         */
     /* function-key legend on the very last row, right above the physical
      * function keys.  F1 / F2 are live (white); F3 EDIT / F4 SAVE /
-     * F5 LOAD are placeholders (grey - see not_implemented()).           */
-    clear_row(31);
-    put_at( 1 * 8, 31, "F1=REC F2=PLAY",          COL_WHITE);
-    put_at(16 * 8, 31, "F3=EDIT F4=SAVE F5=LOAD",  COL_GREY);
+     * F5 LOAD are placeholders (grey, see not_implemented()).            */
+    clear_row(ROW_FKEYS);
+    put_at(FKEYS_LIVE_COL * FONT_W, ROW_FKEYS, "F1=REC F2=PLAY", COL_WHITE);
+    put_at(FKEYS_STUB_COL * FONT_W, ROW_FKEYS, "F3=EDIT F4=SAVE F5=LOAD",
+           COL_GREY);
 }

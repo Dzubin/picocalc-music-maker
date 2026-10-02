@@ -16,3 +16,10 @@ Thumbs.db
 
 # Local AI-assistant notes, not for the public repo
 CLAUDE.md
+# Extra build directories (RP2350 / RP2040 / Windows) - see README "Building"
+/build-*/
+
+# Desktop (SDL2) build outputs copied to the top-level folder
+*.exe
+/picocalc-music-maker-Linux
+/libSDL2-2.0.so.0
