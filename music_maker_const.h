@@ -23,13 +23,16 @@
 /* shown on the splash screen */
 #define VERSION "V0.01D"
 
-/* audio.pio only produces a tone for 100..2115 Hz (its upper bound was
- * raised from 2000 so the top C, C7 ~2093 Hz, can sound); outside that
- * range a shifted note is shown on screen but stays silent.                 */
+/* The audible window of this program: a note outside 100..2115 Hz is shown on
+ * screen but stays silent (audible() in music_maker.c). The top C, C7 ~2093 Hz,
+ * is inside it. The starter's audio.pio accepts 20..20000 Hz, so the window is
+ * kept here and not left to the driver.                                     */
+#define AUDIO_MIN_HZ 100u
+#define AUDIO_MAX_HZ 2115u
 
 /* net up/down-arrow presses allowed: one octave (factor of 2) per press
  * - see shift_octave.  Down stops at -1 (/2): at /4 and /8 every note is
- * below the audio driver's 100 Hz floor, so there is nothing to hear. */
+ * below the 100 Hz floor, so there is nothing to hear. */
 #define OCT_MIN (-1)
 #define OCT_MAX ( 3)
 

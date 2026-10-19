@@ -6,6 +6,20 @@ the version here matches the `VERSION` define in `music_maker_const.h`.
 
 ## [Unreleased]
 
+- Updated the vendored `picocalc-text-starter` to Blair Leduc's code of 2026-10-18 (commit
+  `85a002e`) and moved to Pico SDK 2.3.1. The search-hint, deleted-entry and busy-card fixes this
+  copy carried are in his code now; four small local fixes remain (README, Third-party). The audio
+  driver in it now sounds 20 to 20000 Hz, so the local change that raised its top limit to 2115 Hz
+  is gone. The program now keeps its 100 to 2115 Hz audible window itself (`audible()`,
+  `AUDIO_MIN_HZ`, `AUDIO_MAX_HZ`), so the sound on the PicoCalc is as before; the Windows build no
+  longer sounds notes outside it.
+- Vendored starter (`picocalc-text-starter-main/drivers/`, program unchanged, not rebuilt): `fat32.c` skips deleted
+  directory entries before long-name parts (an out-of-bounds stack write), copes with the last part of a
+  247 to 255 character name, and `fat32_write()` no longer leaks a cluster when a write starts on a cluster
+  boundary (a zero-length write returns at once); `sdcard.c` waits for a busy card by the clock and before
+  every command, and gives up on a command if the card stays busy; `lcd_putstr()` cuts a long string at the
+  edge of the screen.
+
 ## [0.01D] - 2026-10-02
 
 ### Changed

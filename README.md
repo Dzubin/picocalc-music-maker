@@ -91,11 +91,13 @@ LICENSE, CHANGELOG.md        MIT licence; version history
    The current shift is shown near the top as `OCTAVE x2` / `OCTAVE /2` etc.
    Each press is a true octave (a factor of **2**), clamped to `/2` … `x8`;
    there is no `x3` / `/3`. Down stops at `/2` because at `/4` and `/8` every
-   note is below the driver's 100 Hz floor. It does **not** affect the DTMF or
+   note is below 100 Hz. It does **not** affect the DTMF or
    `! @ $` phone tones (their pitches are fixed).
-   Because the audio driver only makes sound between 100 Hz and 2115 Hz (its
-   upper limit was raised from 2000 so the top **C7** ≈ 2093 Hz can sound), an
-   extreme shift can still be displayed while being silent.
+   The program only sounds notes between 100 Hz and 2115 Hz (`AUDIO_MIN_HZ` and
+   `AUDIO_MAX_HZ` in `music_maker_const.h`; the upper limit lets the top **C7**
+   ≈ 2093 Hz sound), so an extreme shift can still be displayed while being silent.
+   The starter's audio driver would sound 20 to 20000 Hz (since 2026-10-18), but
+   the program keeps the window it was made for.
 
 ## Tuning
 
@@ -234,8 +236,9 @@ halves, same as live). The octave‑up keys (`K` `L` `ENTER`, `I` `O` `P`, `,`
 - **Mono speaker vs. stereo tones.** DTMF and the `! @ $` phone tones put a
   different frequency on each channel; through the built‑in speaker you mostly
   hear one of the pair. Use headphones for the real sound.
-- **Audible range is ~100–2115 Hz.** Notes shifted outside that window still
-  show on screen but stay silent.
+- **Audible range is 100 to 2115 Hz.** Notes shifted outside that window still
+  show on screen but stay silent. The program keeps this window itself; the audio
+  driver (updated 2026-10-18) would sound 20 to 20000 Hz.
 - **No tests / CI.** Build and flash are manual.
 
 ## Building
@@ -253,12 +256,12 @@ exactly what `picocalc-text-starter` already builds with.
 Open this folder (`picocalc-music-maker/`) in VS Code with the *Raspberry Pi
 Pico* extension installed, then **Compile** (or *Run > Compile Project*). The
 `CMakeLists.txt` here uses the same `pico-vscode.cmake` preamble as the starter,
-so it picks up your installed SDK 2.2.0 / toolchain automatically.
+so it picks up your installed SDK 2.3.1 / toolchain automatically.
 
 ### From a terminal
 
 ```bash
-# point at your Pico SDK checkout (SDK 2.2.0; install per the Raspberry Pi
+# point at your Pico SDK checkout (SDK 2.3.1; install per the Raspberry Pi
 # "C/C++ SDK" docs, or let the VS Code Pico extension manage it)
 export PICO_SDK_PATH=/path/to/pico-sdk
 
@@ -291,9 +294,9 @@ linked statically, so it is a single file with no `SDL2.dll`. The PC keyboard
 takes the place of the PicoCalc's (the numeric keypad works too). `~` closes the
 program (there is no BOOTSEL on a PC), and ESC on the splash screen closes it
 after the same erase confirmation as on the PicoCalc; ESC on the music screen
-just returns to the splash. The PC build is not limited to the PicoCalc's
-100 to 2115 Hz audible window, so very high shifted notes that are silent on
-the device will sound on the PC.
+just returns to the splash. The PC build keeps the same 100 to 2115 Hz audible
+window as the PicoCalc (earlier versions sounded very high shifted notes on the
+PC that were silent on the device).
 
 ### Linux
 
@@ -372,7 +375,7 @@ a true octave, never a `x3` / `/3`.
 | `L` → B (B4) | 247 | **494** | 988 | 1976 | 3952\* |
 | `ENTER` → C (C5) | 262 | **524** | 1048 | 2096 | 4192\* |
 
-All values in Hz. **\*** = above the audio driver's 2115 Hz ceiling, so the note
+All values in Hz. **\*** = above the program's 2115 Hz ceiling, so the note
 is drawn on screen but stays silent. `/4` and `/8` are not offered: every note
 there falls below the 100 Hz floor. The sharp/flat one-octave-up keys
 (`I O P`, `,` `.`) work the same way — `2 x` their base tone, then the shift.
@@ -393,11 +396,30 @@ license at [`picocalc-text-starter-main/LICENSE`](picocalc-text-starter-main/LIC
 Copyright © 2025 Blair Leduc. The Raspberry Pi Pico SDK it builds against is
 licensed separately by Raspberry Pi Ltd. (BSD-3-Clause).
 
-The vendored copy is unchanged except for **two small changes**. In
-`picocalc-text-starter-main/drivers/audio.pio` the upper limit of
-`audio_pwm_is_not_silence()` was raised from 2000 Hz to 2115 Hz so the top C
-(about 2093 Hz) can sound. In `picocalc-text-starter-main/drivers/fat32.c`,
-`get_next_free_cluster()` now advances its search hint past the cluster it just
-handed out; without that, every later allocation re-scans the clusters already
-given out, and a long sequential write to the SD card looks hung. Everything
-else is exactly as downloaded.
+The vendored copy is Blair Leduc's `picocalc-text-starter` as it was on 2026-10-18
+(commit `85a002e`, "Upgrade to SDK 2.3.1"), with **four small local fixes** that
+are not in his repository yet:
+
+1. In `picocalc-text-starter-main/drivers/fat32.c`, `fat32_write()` no longer walks
+   the cluster chain, allocating a cluster at a cluster-aligned end of file, before
+   it allocates the clusters the write needs. That walk could leave a cluster
+   unreachable (a leak). A write of zero bytes returns at once.
+2. In the same file, `fat32_dir_read()` copies the last part of a long file name of
+   248 to 255 characters as far as it fits; upstream drops that part.
+3. In `picocalc-text-starter-main/drivers/sdcard.c`, a command is not sent to a card
+   that is still busy after the 0.5 s wait.
+4. In `picocalc-text-starter-main/drivers/lcd.c`, `lcd_putstr()` cuts a string off at
+   the right edge of the display, because the line buffer holds exactly one row of
+   text.
+
+Earlier versions of this copy carried other local changes, and those are now in
+the upstream code: the search-hint fix in `get_next_free_cluster()`
+([#30](https://github.com/BlairLeduc/picocalc-text-starter/pull/30)), the
+deleted-entry fixes in `fat32_dir_read()` and `link_entry()`
+([#32](https://github.com/BlairLeduc/picocalc-text-starter/pull/32)), the timed
+busy-card wait in `sdcard.c`
+([#33](https://github.com/BlairLeduc/picocalc-text-starter/pull/33)) and
+`lcd_unblit()` ([#31](https://github.com/BlairLeduc/picocalc-text-starter/pull/31)).
+`audio.pio` is exactly as downloaded: it now accepts 20 to 20000 Hz
+([#29](https://github.com/BlairLeduc/picocalc-text-starter/pull/29)), where it used
+to accept only 100 to 2000 Hz. Everything else is exactly as downloaded.

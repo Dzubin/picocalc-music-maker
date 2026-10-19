@@ -260,6 +260,7 @@ static void make_spn(const char *label, bool up, char out[4]);
 
 /* octave shift + status line */
 static uint32_t shift_octave(uint32_t f, int oct);
+static uint32_t audible(uint32_t hz);
 static void show_octave(int oct);
 
 /* recorder */
@@ -458,7 +459,7 @@ static void music_screen(void)
                 hi = shift_octave(hi, oct);
             }
 
-            audio_play_sound(lo, hi);
+            audio_play_sound(audible(lo), audible(hi));
             show_note(m.label, lo, hi);
             sounding = code;
             press_ms = plat_now_ms();
@@ -993,6 +994,16 @@ static uint32_t shift_octave(uint32_t f, int oct)
     return f;
 }
 
+/*
+ *  The frequency to give the audio driver: `hz` inside the window this program
+ *  is made for (AUDIO_MIN_HZ..AUDIO_MAX_HZ), otherwise 0, which is silence. The
+ *  note is still shown on screen. The starter's audio driver would sound more.
+ */
+static uint32_t audible(uint32_t hz)
+{
+    return (hz >= AUDIO_MIN_HZ && hz <= AUDIO_MAX_HZ) ? hz : 0;
+}
+
 static void show_octave(int oct)
 {
     char b[24];
@@ -1135,7 +1146,7 @@ static void play_recording(void)
         show_play(i + 1, count, r);
 
         if (r->lo || r->hi)
-            audio_play_sound(r->lo, r->hi);
+            audio_play_sound(audible(r->lo), audible(r->hi));
 
         uint32_t end  = plat_now_ms() + r->dur_ms;
         bool     stop = false;
